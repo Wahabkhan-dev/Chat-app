@@ -1,0 +1,672 @@
+'use client';
+
+import { useEffect, useRef } from 'react';
+import { useAppContext } from '@/context/AppContext';
+import { connectSocket, disconnectSocket, getSocket } from '@/services/socket';
+import { api } from '@/lib/api';
+import { toast } from '@/hooks/use-toast';
+import { playNotificationSound } from '@/lib/notificationSound';
+
+export function useSocket() {
+  const { state, dispatch } = useAppContext();
+  const initialized = useRef(false);
+  // Always-current snapshot of state for use inside socket callbacks (avoids stale closures)
+  const stateRef = useRef(state);
+  useEffect(() => { stateRef.current = state; });
+  // Dedup processed message IDs — prevents double-delivery from room + personal room
+  const processedMsgIds = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (!state.isAuthenticated || initialized.current) return;
+    const token = localStorage.getItem('teams_token');
+    if (!token) return;
+
+    initialized.current = true;
+    const socket = connectSocket(token);
+
+    // ── Load initial data ──────────────────────────────────────────────────
+    const loadData = async () => {
+      try {
+        const [usersRes, groupsRes, notifsRes] = await Promise.allSettled([
+          api.get<{ users: any[] }>('/users/directory'),
+          api.get<{ groups: any[] }>('/groups'),
+          api.get<{ notifications: any[] }>('/notifications'),
+        ]);
+
+        let users: any[] = [];
+        let groups: any[] = [];
+
+        if (usersRes.status === 'fulfilled') {
+          users = usersRes.value.users.map((u: any) => ({
+            id: String(u.id),
+            name: u.name,
+            email: u.email,
+            role: u.role,
+            avatar: u.avatar || '',
+            status: u.status || 'offline',
+            department: u.department || '',
+            createdAt: u.created_at ? String(u.created_at) : new Date().toISOString(),
+            isActive: u.is_active === 1,
+          }));
+          dispatch({ type: 'SET_USERS', payload: users });
+        } else {
+          console.error('[useSocket] failed to load users:', usersRes.reason);
+        }
+
+        if (groupsRes.status === 'fulfilled') {
+          groups = groupsRes.value.groups.map((g: any) => ({
+            id: String(g.id),
+            name: g.name,
+            description: g.description || '',
+            avatar: g.avatar || null,
+            createdBy: String(g.createdBy),
+            ownerId: String(g.ownerId),
+            members: (g.members || []).map(String),
+            admins: (g.admins || []).map(String),
+            createdAt: g.createdAt || new Date().toISOString(),
+            settings: g.settings || {
+              messagePermission: 'all',
+              addMemberPermission: 'everyone',
+              allowMemberLeave: true,
+              slowMode: false,
+              slowModeSeconds: 10,
+            },
+          }));
+          dispatch({ type: 'SET_GROUPS', payload: groups });
+
+          const leftAtMeta: Record<string, any> = {};
+          groupsRes.value.groups.forEach((g: any) => {
+            if (g.leftAt || g.leftReason) {
+              leftAtMeta[String(g.id)] = {
+                ...(g.leftAt ? { leftAt: g.leftAt } : {}),
+                ...(g.leftReason ? { leftReason: g.leftReason } : {}),
+              };
+            }
+          });
+          if (Object.keys(leftAtMeta).length > 0) {
+            dispatch({ type: 'HYDRATE_CONVERSATION_META', payload: leftAtMeta });
+          }
+
+          groups.filter((g: any) => !g.leftAt).forEach((g: any) => socket.emit('join_group', { groupId: g.id }));
+        } else {
+          console.error('[useSocket] failed to load groups:', groupsRes.reason);
+        }
+
+        if (notifsRes.status === 'fulfilled') {
+          const notifications = (notifsRes.value.notifications || []).map((n: any) => ({
+            id: String(n.id),
+            type: n.type as any,
+            recipientId: n.recipient_id ? String(n.recipient_id) : 'all',
+            senderId: n.sender_id ? String(n.sender_id) : undefined,
+            conversationId: n.conversation_id ? String(n.conversation_id) : undefined,
+            messageId: n.message_id ? String(n.message_id) : undefined,
+            emoji: n.emoji || undefined,
+            title: n.title,
+            body: n.body,
+            timestamp: n.created_at instanceof Date ? n.created_at.toISOString() : String(n.created_at),
+            read: n.is_read === 1,
+          }));
+          notifications.forEach((n: any) => dispatch({ type: 'ADD_NOTIFICATION', payload: n }));
+        } else {
+          console.error('[useSocket] failed to load notifications:', notifsRes.reason);
+        }
+
+        // Compute unread counts for messages received while user was offline
+        // Uses lastReadAt (when user last viewed a conversation) not lastMessage.timestamp (which can be stale)
+        try {
+          const uid = stateRef.current.currentUser?.id;
+          const stored = uid ? localStorage.getItem(`cmeta_${uid}`) : null;
+          if (stored) {
+            const savedMeta = JSON.parse(stored);
+            const toCheck = Object.entries(savedMeta)
+              .filter(([, m]: any) => m.lastReadAt)
+              .map(([id, m]: any) => ({ id, since: m.lastReadAt }));
+            if (toCheck.length > 0) {
+              const { counts, previews } = await api.post<{ counts: Record<string, number>; previews: Record<string, { senderId: string; content: string; type: string; timestamp: string }> }>('/messages/unread-since', { conversations: toCheck });
+              dispatch({ type: 'UPDATE_UNREAD_COUNTS', payload: { counts, previews } });
+
+              // Add bell-panel notifications for each conversation that has offline unread messages.
+              // Uses locally-scoped `users` and `groups` (just fetched) to avoid stale-ref race.
+              const currentUserId = uid || '';
+              Object.entries(counts).forEach(([convId, count]) => {
+                if (Number(count) <= 0) return;
+                const isDm = convId.startsWith('dm_');
+                const preview = previews?.[convId];
+                const rawContent = preview?.content || '';
+                const bodyText = rawContent
+                  ? rawContent.replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1').slice(0, 80) || '📎 Attachment'
+                  : `${count} new message${Number(count) > 1 ? 's' : ''}`;
+
+                if (isDm) {
+                  const parts = convId.split('_');
+                  const otherId = parts[1] === String(currentUserId) ? parts[2] : parts[1];
+                  const sender = users.find(u => u.id === otherId);
+                  if (!sender) return;
+                  dispatch({
+                    type: 'ADD_NOTIFICATION',
+                    payload: {
+                      id: `offline_msg_${convId}`,
+                      type: 'dm_message' as any,
+                      recipientId: currentUserId,
+                      senderId: preview?.senderId,
+                      conversationId: convId,
+                      title: sender.name,
+                      body: bodyText,
+                      timestamp: preview?.timestamp || new Date().toISOString(),
+                      read: false,
+                    },
+                  });
+                } else {
+                  const group = groups.find(g => g.id === convId);
+                  if (!group) return;
+                  const senderUser = preview?.senderId ? users.find(u => u.id === preview.senderId) : null;
+                  dispatch({
+                    type: 'ADD_NOTIFICATION',
+                    payload: {
+                      id: `offline_msg_${convId}`,
+                      type: 'group_message' as any,
+                      recipientId: currentUserId,
+                      senderId: preview?.senderId,
+                      conversationId: convId,
+                      title: senderUser ? `${senderUser.name} in ${group.name}` : group.name,
+                      body: bodyText,
+                      timestamp: preview?.timestamp || new Date().toISOString(),
+                      read: false,
+                    },
+                  });
+                }
+              });
+            }
+          }
+        } catch { /* best-effort */ }
+      } catch (err) {
+        console.error('Failed to load initial data:', err);
+      }
+    };
+
+    loadData();
+
+    // ── Rejoin rooms on every (re)connect so group and DM events work after reconnects ──
+    socket.on('connect', () => {
+      const s = stateRef.current;
+      if (s.activeConversation?.type === 'dm' && s.currentUser?.id) {
+        const parts = s.activeConversation.id.split('_');
+        const otherId = parts[1] === String(s.currentUser.id) ? parts[2] : parts[1];
+        socket.emit('join_dm', { otherUserId: otherId });
+      }
+
+      s.groups
+        .filter(g => !s.conversationMeta[g.id]?.leftAt)
+        .forEach((group) => socket.emit('join_group', { groupId: group.id }));
+    });
+
+    const isBlockedConversation = (conversationId?: string) => {
+      return Boolean(conversationId && stateRef.current.conversationMeta[conversationId]?.blocked);
+    };
+
+    // ── Socket event listeners ─────────────────────────────────────────────
+    // Deduplicate message_deleted — personal room + conversation room both fire for DMs
+    const processedDeletes = new Set<string>();
+    socket.on('message_deleted', ({ messageId, conversationId, deletedBy, deletedAt }) => {
+      const s = stateRef.current;
+      if (isBlockedConversation(conversationId) && deletedBy !== s.currentUser?.id) {
+        return;
+      }
+      const key = `${conversationId}:${messageId}`;
+      if (processedDeletes.has(key)) return;
+      processedDeletes.add(key);
+      setTimeout(() => processedDeletes.delete(key), 5000);
+      dispatch({ type: 'DELETE_MESSAGE', payload: { conversationId, messageId, deletedBy, deletedAt } });
+    });
+
+    socket.on('new_message', ({ conversationId, message }) => {
+      const s = stateRef.current;
+      // If we have blocked this conversation, ignore incoming messages from the other user.
+      if (conversationId && message.senderId !== s.currentUser?.id && s.conversationMeta[conversationId]?.blocked) {
+        return;
+      }
+
+      // Deduplicate — DM messages fire on the DM room AND the personal room
+      if (processedMsgIds.current.has(message.id)) return;
+      processedMsgIds.current.add(message.id);
+      if (processedMsgIds.current.size > 300) {
+        const arr = Array.from(processedMsgIds.current);
+        processedMsgIds.current = new Set(arr.slice(-150));
+      }
+
+      dispatch({ type: 'SEND_MESSAGE', payload: { conversationId, message } });
+
+      // Signal delivery back to sender once this client has received the message
+      if (message.senderId !== s.currentUser?.id) {
+        const socketInstance = getSocket();
+        if (socketInstance?.connected) {
+          socketInstance.emit('message_received', { messageId: message.id, conversationId }, (response: any) => {
+            if (!response?.success) {
+              console.warn('[ReadReceipt] message_received failed:', response?.error);
+            }
+          });
+        }
+      }
+
+      // Message notifications are now persisted on the backend. The new_notification event
+      // will handle notification display so we can avoid duplicate local message notifications.
+      if (message.senderId === s.currentUser?.id) return;
+    });
+
+    socket.on('message_edited', ({ messageId, conversationId, content, editedAt }) => {
+      if (isBlockedConversation(conversationId)) return;
+      dispatch({
+        type: 'EDIT_MESSAGE',
+        payload: { conversationId, messageId, newContent: content, editedAt },
+      });
+    });
+
+    socket.on('reaction_updated', ({ messageId, conversationId, reactions }) => {
+      if (isBlockedConversation(conversationId)) return;
+      dispatch({
+        type: 'SET_MESSAGE_REACTIONS',
+        payload: { conversationId, messageId, reactions },
+      });
+    });
+
+    socket.on('user_typing', ({ conversationId, userName }) => {
+      if (isBlockedConversation(conversationId)) return;
+      dispatch({
+        type: 'SET_TYPING',
+        payload: { conversationId, userName, isTyping: true },
+      });
+    });
+
+    socket.on('user_stop_typing', ({ conversationId, userId }) => {
+      if (isBlockedConversation(conversationId)) return;
+      // We need to find the user name to remove from typing
+      // Pass userId so reducer can handle it by id
+      dispatch({
+        type: 'CLEAR_TYPING',
+        payload: { conversationId, userId },
+      });
+    });
+
+    socket.on('user_status_change', ({ userId, status }) => {
+      dispatch({ type: 'UPDATE_USER_STATUS', payload: { userId: String(userId), status } });
+    });
+
+    socket.on('user_updated', ({ user }) => {
+      if (!user) return;
+      const normalized = { ...user, id: String(user.id), isActive: user.is_active === 1 || user.is_active === true };
+      dispatch({ type: 'UPDATE_USER', payload: normalized });
+    });
+
+    const processedUndeletes = new Set<string>();
+    socket.on('message_undeleted', ({ messageId, conversationId }) => {
+      const key = `${conversationId}:${messageId}`;
+      if (processedUndeletes.has(key)) return;
+      processedUndeletes.add(key);
+      setTimeout(() => processedUndeletes.delete(key), 5000);
+      dispatch({ type: 'UNDO_DELETE', payload: { conversationId, messageId } });
+    });
+
+    socket.on('message_pinned', ({ conversationId, message }) => {
+      if (isBlockedConversation(conversationId)) return;
+      dispatch({ type: 'PIN_MESSAGE', payload: { conversationId, message } });
+    });
+
+    socket.on('message_unpinned', ({ conversationId }) => {
+      if (isBlockedConversation(conversationId)) return;
+      dispatch({ type: 'UNPIN_MESSAGE', payload: conversationId });
+    });
+
+    socket.on('new_group', ({ group }) => {
+      const s = stateRef.current;
+      const gid = String(group.id);
+
+      const normalized = {
+        id: gid,
+        name: group.name,
+        description: group.description || '',
+        avatar: group.avatar || null,
+        createdBy: String(group.createdBy),
+        ownerId: String(group.ownerId),
+        members: (group.members || []).map(String),
+        admins: (group.admins || []).map(String),
+        createdAt: group.createdAt || new Date().toISOString(),
+        settings: group.settings || {
+          messagePermission: 'all',
+          addMemberPermission: 'everyone',
+          allowMemberLeave: true,
+          slowMode: false,
+          slowModeSeconds: 10,
+        },
+      };
+
+      const alreadyExists = s.groups.some(g => g.id === gid);
+      // leftAt can come from in-memory state OR from localStorage (survives kicks + refresh)
+      const wasLeft = !!(s.conversationMeta[gid]?.leftAt);
+
+      // If leftAt is set, this is ALWAYS a re-add (voluntary leave or kick+refresh)
+      // Must check wasLeft BEFORE alreadyExists to handle kick+refresh scenario
+      if (wasLeft) {
+        dispatch({ type: 'REJOIN_GROUP', payload: normalized });
+        socket.emit('join_group', { groupId: gid });
+        return;
+      }
+
+      if (alreadyExists) return; // already an active member, nothing to do
+
+      // Brand new group
+      dispatch({ type: 'RECEIVE_NEW_GROUP', payload: normalized });
+      socket.emit('join_group', { groupId: gid });
+
+      if (String(group.createdBy) !== s.currentUser?.id) {
+        return;
+      }
+    });
+
+    socket.on('group_role_changed', ({ groupId, userId, role, initiatorId }) => {
+      const s = stateRef.current;
+      const gid = String(groupId);
+      const uid = String(userId);
+      const group = s.groups.find(g => g.id === gid);
+      if (!group) return;
+
+      const isInitiator = String(initiatorId) === s.currentUser?.id;
+
+      if (role === 'owner') {
+        if (isInitiator) return; // Leaving owner already dispatched TRANSFER_ADMIN_AND_LEAVE locally
+        dispatch({
+          type: 'TRANSFER_OWNERSHIP',
+          payload: {
+            groupId: gid,
+            oldOwnerId: group.ownerId,
+            newOwnerId: uid,
+            systemMessage: {
+              id: `sys-own-${Date.now()}`,
+              senderId: 'system',
+              content: `${s.users.find(u => u.id === uid)?.name || 'A member'} is now the group owner`,
+              timestamp: new Date().toISOString(),
+              type: 'text',
+              reactions: [],
+            } as any,
+          },
+        });
+      } else if (role === 'admin') {
+        dispatch({ type: 'PROMOTE_TO_ADMIN', payload: { groupId: gid, userId: uid } });
+      } else if (role === 'member') {
+        dispatch({ type: 'DEMOTE_FROM_ADMIN', payload: { groupId: gid, userId: uid } });
+      }
+    });
+
+    const processedMemberLeave = new Set<string>();
+    socket.on('group_member_left', ({ groupId, userId, leftAt, leftReason }) => {
+      const key = `${groupId}:${userId}`;
+      if (processedMemberLeave.has(key)) return;
+      processedMemberLeave.add(key);
+      setTimeout(() => processedMemberLeave.delete(key), 5000);
+
+      const s = stateRef.current;
+      const uid = String(userId);
+      const gid = String(groupId);
+      const leavingUser = s.users.find(u => u.id === uid);
+      const group = s.groups.find(g => g.id === gid);
+
+      if (uid === s.currentUser?.id) {
+        const wasKicked = leftReason === 'removed' || (!leftAt && s.conversationMeta[gid]?.leftAt === undefined);
+        dispatch({
+          type: 'REMOVE_GROUP_MEMBER',
+          payload: {
+            groupId: gid,
+            userId: uid,
+            leftAt: leftAt || new Date().toISOString(),
+            leftReason: leftReason || (wasKicked ? 'removed' : 'left'),
+            systemMessage: {
+              id: `sys-left-${Date.now()}`,
+              senderId: 'system',
+              content: leftReason === 'removed' ? 'You were removed from the group' : 'You left the group',
+              timestamp: new Date().toISOString(),
+              type: 'text',
+              reactions: [],
+            } as any,
+          },
+        });
+        if (wasKicked && group) {
+          toast({ title: `Removed from "${group.name}"`, description: 'An admin removed you from this group.' });
+        }
+        return;
+      }
+
+      dispatch({
+        type: 'REMOVE_GROUP_MEMBER',
+        payload: {
+          groupId: gid,
+          userId: uid,
+          systemMessage: {
+            id: `sys-left-${Date.now()}`,
+            senderId: 'system',
+            content: `${leavingUser?.name || 'A member'} left the group`,
+            timestamp: new Date().toISOString(),
+            type: 'text',
+            reactions: [],
+          } as any,
+        },
+      });
+    });
+
+    socket.on('group_updated', ({ group }) => {
+      dispatch({
+        type: 'UPDATE_GROUP',
+        payload: {
+          id: String(group.id),
+          name: group.name,
+          description: group.description || '',
+          avatar: group.avatar || null,
+          createdBy: String(group.createdBy),
+          ownerId: String(group.ownerId),
+          members: (group.members || []).map(String),
+          admins: (group.admins || []).map(String),
+          createdAt: group.createdAt || new Date().toISOString(),
+          settings: group.settings || { messagePermission: 'all', addMemberPermission: 'everyone', allowMemberLeave: true, slowMode: false, slowModeSeconds: 10 },
+        },
+      });
+    });
+
+    socket.on('group_deleted', ({ groupId }) => {
+      dispatch({ type: 'DELETE_GROUP', payload: String(groupId) });
+    });
+
+    socket.on('group_members_added', ({ groupId, addedUserIds }) => {
+      const s = stateRef.current;
+      const gid = String(groupId);
+      const group = s.groups.find(g => g.id === gid);
+      if (!group) return;
+
+      const newIds = (addedUserIds as string[]).map(String);
+      const addedNames = newIds
+        .map(id => s.users.find(u => u.id === id)?.name || 'A member')
+        .join(', ');
+
+      dispatch({
+        type: 'ADD_GROUP_MEMBERS',
+        payload: {
+          groupId: gid,
+          userIds: newIds,
+          systemMessage: {
+            id: `sys-added-${Date.now()}`,
+            senderId: 'system',
+            content: `${addedNames} ${newIds.length === 1 ? 'was' : 'were'} added to the group`,
+            timestamp: new Date().toISOString(),
+            type: 'text',
+            reactions: [],
+          } as any,
+        },
+      });
+    });
+
+    socket.on('new_notification', (notif) => {
+      const s = stateRef.current;
+      const isMessageNotification = notif.type === 'dm_message' || notif.type === 'group_message';
+      if (isMessageNotification && notif.conversationId && s.activeConversation?.id === notif.conversationId) {
+        return;
+      }
+
+      if (notif.conversationId && s.conversationMeta[notif.conversationId]?.blocked) {
+        return;
+      }
+
+      dispatch({
+        type: 'ADD_NOTIFICATION',
+        payload: {
+          id: String(notif.id),
+          type: notif.type,
+          recipientId: notif.recipientId ? String(notif.recipientId) : 'all',
+          senderId: notif.senderId ? String(notif.senderId) : undefined,
+          conversationId: notif.conversationId ? String(notif.conversationId) : undefined,
+          messageId: notif.messageId ? String(notif.messageId) : undefined,
+          emoji: notif.emoji || undefined,
+          title: notif.title,
+          body: notif.body,
+          timestamp: notif.timestamp || new Date().toISOString(),
+          read: false,
+        },
+      });
+
+      toast({ title: notif.title, description: notif.body });
+    });
+
+    socket.on('new_user', ({ user }) => {
+      const newUser = {
+        id: String(user.id),
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        avatar: user.avatar || '',
+        status: user.status || 'offline',
+        department: user.department || '',
+        createdAt: user.created_at ? String(user.created_at) : new Date().toISOString(),
+        isActive: user.is_active === 1,
+      };
+
+      dispatch({ type: 'CREATE_USER', payload: newUser });
+
+      dispatch({
+        type: 'ADD_NOTIFICATION',
+        payload: {
+          id: `notif_${Date.now()}`,
+          type: 'user_joined',
+          recipientId: 'all',
+          title: 'New team member',
+          body: `${user.name} has joined the team!`,
+          timestamp: new Date().toISOString(),
+          read: false,
+        },
+      });
+
+      // Show visible popup to every connected user
+      toast({
+        title: '👋 New team member',
+        description: `${user.name} (${user.department || user.role}) has joined the team!`,
+      });
+    });
+
+    socket.on('conversation_metadata_updated', ({ conversationId, userId, action, value }) => {
+      const s = stateRef.current;
+      if (String(userId) !== String(s.currentUser?.id) || !conversationId) return;
+
+      switch (action) {
+        case 'block':
+          dispatch({ type: 'BLOCK_USER', payload: conversationId });
+          break;
+        case 'unblock':
+          dispatch({ type: 'UNBLOCK_USER', payload: conversationId });
+          break;
+        case 'mute':
+          dispatch({ type: 'MUTE_CONVERSATION', payload: { conversationId, muteUntil: null } });
+          break;
+        case 'unmute':
+          dispatch({ type: 'UNMUTE_CONVERSATION', payload: conversationId });
+          break;
+        case 'pin':
+          dispatch({ type: 'PIN_CONVERSATION', payload: conversationId });
+          break;
+        case 'unpin':
+          dispatch({ type: 'UNPIN_CONVERSATION', payload: conversationId });
+          break;
+        default:
+          break;
+      }
+    });
+
+    socket.on('all_notifications_read', () => {
+      dispatch({ type: 'MARK_NOTIFICATIONS_READ' });
+    });
+
+    socket.on('notification_read', ({ notificationId }) => {
+      if (!notificationId) return;
+      dispatch({ type: 'MARK_NOTIFICATION_READ', payload: String(notificationId) });
+    });
+
+    socket.on('conversation_notifications_read', ({ notificationIds }) => {
+      if (!Array.isArray(notificationIds) || notificationIds.length === 0) return;
+      dispatch({ type: 'MARK_NOTIFICATIONS_READ_BY_IDS', payload: notificationIds.map(String) });
+    });
+
+    // Handle message read receipts
+    socket.on('message_read', ({ conversationId, messageId, userId, readAt }) => {
+      const s = stateRef.current;
+      if (userId === s.currentUser?.id) return;
+      if (!conversationId) return;
+
+      const message = s.messages?.[conversationId]?.find((m) => m.id === messageId);
+      if (!message || message.senderId !== s.currentUser?.id) return;
+      if (message.status === 'seen') return;
+
+      dispatch({ type: 'SET_MESSAGE_STATUS', payload: { conversationId, messageId, status: 'seen' } });
+    });
+
+    socket.on('message_delivered', ({ messageId, conversationId, deliveredAt }) => {
+      const s = stateRef.current;
+      const message = s.messages?.[conversationId]?.find((m) => m.id === messageId);
+      if (!message || message.senderId !== s.currentUser?.id) return;
+      if (message.status === 'seen' || message.status === 'delivered') return;
+
+      dispatch({ type: 'SET_MESSAGE_STATUS', payload: { conversationId, messageId, status: 'delivered' } });
+    });
+
+    socket.on('conversation_read', ({ conversationId, userId, readUntilMessageId, readAt }) => {
+      const s = stateRef.current;
+      if (userId === s.currentUser?.id) return;
+      if (!readUntilMessageId) return;
+
+      const numericCutoff = Number(readUntilMessageId);
+      if (Number.isNaN(numericCutoff)) return;
+
+      const messages = s.messages?.[conversationId] || [];
+      messages.forEach((message) => {
+        if (message.senderId !== s.currentUser?.id) return;
+        const messageIdNum = Number(message.id);
+        if (Number.isNaN(messageIdNum) || messageIdNum > numericCutoff) return;
+        if (message.status === 'seen') return;
+        dispatch({ type: 'SET_MESSAGE_STATUS', payload: { conversationId, messageId: message.id, status: 'seen' } });
+      });
+    });
+
+    // Handle pinned messages
+    socket.on('message_pinned', ({ conversationId, message }) => {
+      dispatch({
+        type: 'PIN_MESSAGE',
+        payload: { conversationId, message },
+      });
+    });
+
+    socket.on('message_unpinned', ({ conversationId }) => {
+      dispatch({
+        type: 'UNPIN_MESSAGE',
+        payload: conversationId,
+      });
+    });
+
+    return () => {
+      initialized.current = false;
+      disconnectSocket();
+    };
+  }, [state.isAuthenticated, dispatch]);
+}

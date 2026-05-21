@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-NetTCPConnection -LocalPort 9002 -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 9002 -State Listen | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Get-Process -Id $_ })",
+      "PowerShell(Stop-Process -Id 13576 -Force)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Maviya Shah\\\\Desktop\\\\Teams\" -Recurse -Force)",
+      "Bash(Select-Object FullName)",
+      "Bash(mkdir -p \"C:/Users/Maviya Shah/Desktop/teams-backend/config\" \"C:/Users/Maviya Shah/Desktop/teams-backend/middleware\" \"C:/Users/Maviya Shah/Desktop/teams-backend/routes\" \"C:/Users/Maviya Shah/Desktop/teams-backend/db\" && echo \"done\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Maviya Shah\\Desktop\\teams-backend"
+    ]
+  }
+}

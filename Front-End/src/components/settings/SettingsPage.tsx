@@ -1,0 +1,245 @@
+﻿
+"use client";
+
+import React, { useState, useRef } from 'react';
+import { useAppContext } from '@/context/AppContext';
+import { updateSetting } from '@/services/settings';
+import { User, Palette, Save, Loader2, Monitor, Moon, Sun, Globe, Camera } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { toast } from '@/hooks/use-toast';
+import { Avatar } from '../ui/avatar';
+import { cn } from '@/lib/utils';
+
+const SettingsPage: React.FC = () => {
+  const { state, dispatch } = useAppContext();
+  const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isAdmin = state.currentUser?.role === 'admin';
+
+  const [profileData, setProfileData] = useState({
+    department: state.currentUser?.department || '',
+    title: 'Senior Engineer',
+  });
+
+  const handleSave = async () => {
+    if (!state.currentUser) return;
+    setIsSaving(true);
+    try {
+      const { user: updated } = await (await import('@/lib/api')).api.put<{ user: any }>(`/users/${state.currentUser.id}`, {
+        role: state.currentUser.role,
+        department: profileData.department,
+        avatar: state.currentUser.avatar || '',
+      });
+      dispatch({
+        type: 'UPDATE_USER',
+        payload: { ...state.currentUser, ...updated, id: String(updated.id), isActive: updated.is_active === 1 },
+      });
+      toast({ title: 'Settings Saved', description: 'Your workspace preferences have been updated.' });
+    } catch {
+      toast({ title: 'Failed to save', variant: 'destructive' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !state.currentUser) return;
+    setIsUploadingPhoto(true);
+    try {
+      const formData = new FormData();
+      formData.append('avatar', file);
+      const token = typeof window !== 'undefined' ? localStorage.getItem('teams_token') : null;
+      const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+      const res = await fetch(`${BASE_URL}/users/me/avatar`, {
+        method: 'PATCH',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      });
+      if (!res.ok) throw new Error('Upload failed');
+      const data = await res.json();
+      dispatch({ type: 'UPDATE_USER', payload: { ...state.currentUser, avatar: data.avatarKey } });
+      toast({ title: 'Profile picture updated', description: 'Your photo is now visible to the team.' });
+    } catch {
+      toast({ title: 'Upload failed', description: 'Could not update your profile picture.', variant: 'destructive' });
+    } finally {
+      setIsUploadingPhoto(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleThemeChange = (theme: 'light' | 'dark' | 'system') => {
+    const updatedSettings = updateSetting('theme', theme);
+    dispatch({ type: 'LOAD_SETTINGS', payload: updatedSettings });
+  };
+
+  return (
+    <div className="flex-1 bg-background p-8 overflow-y-auto scrollbar-hide animate-in fade-in duration-500">
+      <div className="max-w-4xl mx-auto">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold font-headline text-foreground tracking-tight">Workspace Settings</h1>
+          <p className="text-muted-foreground mt-1 text-sm font-medium">Manage your account preferences and workspace experience.</p>
+        </div>
+
+        <Tabs defaultValue="profile" className="space-y-6">
+          <TabsList className="bg-card border p-1 rounded-xl h-auto">
+            <TabsTrigger value="profile" className="gap-2 px-6 py-2 rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white transition-all font-bold text-xs uppercase tracking-widest">
+              <User className="h-4 w-4" />
+              <span>Profile</span>
+            </TabsTrigger>
+            <TabsTrigger value="appearance" className="gap-2 px-6 py-2 rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white transition-all font-bold text-xs uppercase tracking-widest">
+              <Palette className="h-4 w-4" />
+              <span>Appearance</span>
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="profile" className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
+            <div className="bg-card rounded-2xl border border-border shadow-sm p-8">
+              <div className="flex items-center gap-8 mb-10">
+                <div className="relative group cursor-pointer" onClick={() => !isUploadingPhoto && fileInputRef.current?.click()} title="Change profile picture">
+                  <Avatar name={state.currentUser?.name || ''} src={state.currentUser?.avatar} size="xl" />
+                  <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    {isUploadingPhoto
+                      ? <div className="h-7 w-7 border-2 border-white/50 border-t-white rounded-full animate-spin" />
+                      : <Camera className="h-8 w-8 text-white" />
+                    }
+                  </div>
+                </div>
+
+                <div className="flex-1">
+                  <h3 className="text-xl font-bold font-headline">Profile Picture</h3>
+                  <p className="text-sm text-muted-foreground mb-6 font-medium leading-relaxed">
+                    Upload a clear photo to help your team members recognize you in conversations and meetings.
+                  </p>
+                  <div className="flex gap-3">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      className="hidden"
+                      accept="image/*"
+                      onChange={handlePhotoChange}
+                    />
+                    <Button variant="outline" size="sm" className="rounded-xl h-10 px-6 font-bold border-border hover:bg-primary/5 hover:text-primary transition-all gap-2" onClick={() => fileInputRef.current?.click()} disabled={isUploadingPhoto}>
+                      <Camera className="h-4 w-4" />
+                      {isUploadingPhoto ? 'Uploading...' : 'Change Photo'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <Separator className="mb-8" />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="space-y-2.5">
+                  <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Full Name</Label>
+                  <div className="rounded-xl bg-muted/30 border border-border h-12 px-4 flex items-center text-sm font-medium text-muted-foreground select-none">
+                    {state.currentUser?.name}
+                  </div>
+                </div>
+                <div className="space-y-2.5">
+                  <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Email Address</Label>
+                  <div className="rounded-xl bg-muted/30 border border-border h-12 px-4 flex items-center text-sm font-medium text-muted-foreground select-none">
+                    {state.currentUser?.email}
+                  </div>
+                </div>
+                <div className="space-y-2.5">
+                  <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Department</Label>
+                  {isAdmin ? (
+                    <Input
+                      value={profileData.department}
+                      onChange={(e) => setProfileData({...profileData, department: e.target.value})}
+                      className="rounded-xl border-border bg-muted/20 h-12 text-sm font-medium focus:bg-card transition-all"
+                    />
+                  ) : (
+                    <div className="rounded-xl bg-muted/30 border border-border h-12 px-4 flex items-center text-sm font-medium text-foreground">
+                      {state.currentUser?.department || '—'}
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-2.5">
+                  <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Professional Title</Label>
+                  <div className="rounded-xl bg-muted/30 border border-border h-12 px-4 flex items-center text-sm font-medium text-foreground">
+                    {profileData.title || '—'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="appearance" className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
+            <div className="bg-card rounded-2xl border border-border shadow-sm p-8">
+              <h3 className="text-lg font-bold mb-8 font-headline">Theme Preference</h3>
+              <div className="grid grid-cols-3 gap-6">
+                <div 
+                  onClick={() => handleThemeChange('light')}
+                  className={cn(
+                    "p-6 border-2 rounded-2xl flex flex-col items-center gap-4 cursor-pointer transition-all",
+                    state.theme === 'light' ? "border-primary bg-primary/5 ring-4 ring-primary/10 shadow-lg" : "hover:border-primary/40 border-border bg-muted/20"
+                  )}
+                >
+                  <Sun className={cn("h-8 w-8", state.theme === 'light' ? "text-primary" : "text-muted-foreground")} />
+                  <span className="text-[10px] font-bold uppercase tracking-widest">Light Mode</span>
+                </div>
+                <div 
+                  onClick={() => handleThemeChange('dark')}
+                  className={cn(
+                    "p-6 border-2 rounded-2xl flex flex-col items-center gap-4 cursor-pointer transition-all",
+                    state.theme === 'dark' ? "border-primary bg-primary/5 ring-4 ring-primary/10 shadow-lg" : "hover:border-primary/40 border-border bg-muted/20"
+                  )}
+                >
+                  <Moon className={cn("h-8 w-8", state.theme === 'dark' ? "text-primary" : "text-muted-foreground")} />
+                  <span className="text-[10px] font-bold uppercase tracking-widest">Dark Mode</span>
+                </div>
+                <div 
+                  onClick={() => handleThemeChange('system')}
+                  className={cn(
+                    "p-6 border-2 rounded-2xl flex flex-col items-center gap-4 cursor-pointer transition-all",
+                    state.theme === 'system' ? "border-primary bg-primary/5 ring-4 ring-primary/10 shadow-lg" : "hover:border-primary/40 border-border bg-muted/20"
+                  )}
+                >
+                  <Monitor className={cn("h-8 w-8", state.theme === 'system' ? "text-primary" : "text-muted-foreground")} />
+                  <span className="text-[10px] font-bold uppercase tracking-widest">System</span>
+                </div>
+              </div>
+
+              <div className="mt-12 space-y-4">
+                <h3 className="text-lg font-bold font-headline">Localization</h3>
+                <div className="flex items-center justify-between p-5 bg-muted/30 dark:bg-muted/5 rounded-2xl border border-border/50">
+                   <div className="flex items-center gap-4">
+                     <div className="p-2 bg-card rounded-lg border shadow-sm">
+                       <Globe className="h-5 w-5 text-muted-foreground" />
+                     </div>
+                     <span className="text-sm font-bold">Workspace Language</span>
+                   </div>
+                   <Button variant="ghost" size="sm" className="font-bold text-primary hover:bg-primary/5 rounded-lg h-9 px-4">English (US)</Button>
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+
+          {isAdmin && (
+            <div className="flex justify-end pt-8">
+              <Button
+                className="bg-primary hover:bg-primary/90 text-white px-10 h-16 rounded-2xl shadow-xl shadow-primary/20 gap-3 transition-all hover:scale-105 active:scale-95"
+                onClick={handleSave}
+                disabled={isSaving}
+              >
+                {isSaving ? <Loader2 className="h-6 w-6 animate-spin" /> : <Save className="h-6 w-6" />}
+                <span className="text-xl font-bold">Save Changes</span>
+              </Button>
+            </div>
+          )}
+        </Tabs>
+      </div>
+    </div>
+  );
+};
+
+export default SettingsPage;

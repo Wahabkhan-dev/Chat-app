@@ -1,0 +1,1569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Gemma's Story — A Bond of Love, A Life Saved</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #1a0a05;
+    overflow: hidden;
+    font-family: 'Georgia', serif;
+  }
+  #game-container {
+    width: 100vw; height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+  }
+  canvas { display: block; image-rendering: pixelated; }
+  #loading-screen {
+    position: fixed; inset: 0;
+    background: linear-gradient(180deg, #1a0a05 0%, #2d1510 50%, #0d0508 100%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 9999; transition: opacity 1s ease;
+  }
+  #loading-screen .paw-title {
+    font-size: clamp(2rem, 6vw, 4rem);
+    color: #f5c87a;
+    text-shadow: 0 0 30px #e8833a, 0 2px 8px rgba(0,0,0,0.8);
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+  #loading-screen .subtitle {
+    color: #c9956b; font-size: clamp(0.8rem, 2vw, 1.1rem);
+    letter-spacing: 0.2em; margin-bottom: 48px;
+    opacity: 0.8;
+  }
+  .loading-bar-wrap {
+    width: min(340px, 80vw); height: 10px;
+    background: rgba(255,255,255,0.1); border-radius: 99px;
+    overflow: hidden; border: 1px solid rgba(245,200,122,0.3);
+  }
+  .loading-bar-fill {
+    height: 100%; width: 0%; background: linear-gradient(90deg, #e8833a, #f5c87a);
+    border-radius: 99px; transition: width 0.3s ease;
+    box-shadow: 0 0 12px #e8833a;
+  }
+  .loading-tip { color: #a07856; font-size: 0.78rem; margin-top: 16px; letter-spacing: 0.1em; }
+  @keyframes pulse-glow {
+    0%,100% { text-shadow: 0 0 20px #e8833a, 0 2px 8px rgba(0,0,0,0.8); }
+    50% { text-shadow: 0 0 40px #f5c87a, 0 0 60px #e8833a, 0 2px 8px rgba(0,0,0,0.8); }
+  }
+</style>
+</head>
+<body>
+<div id="loading-screen">
+  <div class="paw-title">🐾 Gemma's Story</div>
+  <div class="subtitle">A Bond of Love, A Life Saved</div>
+  <div class="loading-bar-wrap"><div class="loading-bar-fill" id="load-bar"></div></div>
+  <div class="loading-tip" id="load-tip">Waking Shadow up...</div>
+</div>
+<div id="game-container"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.60.0/phaser.min.js"></script>
+<script>
+// ============================================================
+// GEMMA'S STORY — Complete Game
+// ============================================================
+
+const W = 800, H = 450;
+
+// ---- Utility: draw rounded rect ----
+function roundRect(gfx, x, y, w, h, r, fill, stroke, alpha=1) {
+  gfx.fillStyle(fill, alpha);
+  if (stroke !== undefined) gfx.lineStyle(2, stroke, alpha);
+  gfx.fillRoundedRect(x, y, w, h, r);
+  if (stroke !== undefined) gfx.strokeRoundedRect(x, y, w, h, r);
+}
+
+// ============================================================
+// ASSET GENERATION — procedural pixel art textures
+// ============================================================
+function generateAssets(scene) {
+  const g = scene.make.graphics({ add: false });
+
+  // ---- SKY GRADIENT ----
+  g.clear();
+  // sunset sky layers
+  for (let y = 0; y < 280; y++) {
+    const t = y / 280;
+    const r = Math.floor(Phaser.Math.Linear(180, 90, t));
+    const gg = Math.floor(Phaser.Math.Linear(100, 50, t));
+    const b = Math.floor(Phaser.Math.Linear(60, 80, t));
+    g.fillStyle(Phaser.Display.Color.GetColor(r, gg, b), 1);
+    g.fillRect(0, y, 800, 1);
+  }
+  g.generateTexture('sky', 800, 280);
+
+  // ---- GROUND TILE ----
+  g.clear();
+  g.fillStyle(0x4a3520, 1); g.fillRect(0, 0, 32, 32);
+  g.fillStyle(0x5c4430, 1); g.fillRect(0, 0, 32, 8);
+  g.fillStyle(0x3d7a3d, 1); g.fillRect(0, 0, 32, 5);
+  // grass texture
+  for (let i = 0; i < 6; i++) {
+    g.fillStyle(0x4a9a4a, 0.6);
+    g.fillRect(i * 5 + 1, 0, 2, 4);
+  }
+  g.generateTexture('ground', 32, 32);
+
+  // ---- PLATFORM ----
+  g.clear();
+  g.fillStyle(0x5c4220, 1); g.fillRect(0, 0, 80, 20);
+  g.fillStyle(0x3d7a3d, 1); g.fillRect(0, 0, 80, 6);
+  g.fillStyle(0x4a9a4a, 0.7);
+  for (let i = 0; i < 5; i++) g.fillRect(i * 16 + 2, 0, 3, 5);
+  g.lineStyle(1, 0x2a1a10, 0.5); g.strokeRect(0, 0, 80, 20);
+  g.generateTexture('platform', 80, 20);
+
+  // ---- ROCK ----
+  g.clear();
+  g.fillStyle(0x7a6a58, 1);
+  g.fillEllipse(22, 20, 44, 36);
+  g.fillStyle(0x9a8a78, 0.6);
+  g.fillEllipse(16, 14, 18, 12);
+  g.fillStyle(0x4a3a28, 0.4);
+  g.fillEllipse(28, 26, 16, 10);
+  g.generateTexture('rock', 44, 36);
+
+  // ---- TREE (background) ----
+  g.clear();
+  // trunk
+  g.fillStyle(0x4a2e15, 1); g.fillRect(18, 50, 14, 80);
+  g.fillStyle(0x5c3a1a, 0.5); g.fillRect(20, 50, 5, 80);
+  // foliage layers
+  g.fillStyle(0x2d6e2d, 0.9); g.fillTriangle(25, 0, 0, 55, 50, 55);
+  g.fillStyle(0x3a8a3a, 0.8); g.fillTriangle(25, 12, 2, 60, 48, 60);
+  g.fillStyle(0x4a9a4a, 0.7); g.fillTriangle(25, 22, 4, 62, 46, 62);
+  // light spots
+  g.fillStyle(0x6aba6a, 0.3);
+  g.fillCircle(18, 25, 6); g.fillCircle(32, 32, 4);
+  g.generateTexture('tree', 50, 130);
+
+  // ---- SHADOW (German Shepherd) ----
+  // Body
+  g.clear();
+  // shadow = black/dark dog silhouette with detail
+  // body
+  g.fillStyle(0x2a1a08, 1);
+  g.fillEllipse(28, 24, 44, 28);
+  // head
+  g.fillStyle(0x1a0d04, 1);
+  g.fillCircle(48, 16, 13);
+  // snout
+  g.fillStyle(0x2a1a0a, 1);
+  g.fillEllipse(56, 20, 12, 7);
+  // ear 1
+  g.fillStyle(0x1a0d04, 1);
+  g.fillTriangle(40, 5, 44, 18, 48, 5);
+  // ear 2
+  g.fillStyle(0x2a1a08, 1);
+  g.fillTriangle(50, 5, 54, 18, 58, 7);
+  // legs
+  g.fillStyle(0x1a0d04, 1);
+  g.fillRect(10, 32, 7, 20); // back left
+  g.fillRect(20, 32, 7, 20); // back right
+  g.fillRect(34, 32, 7, 20); // front left
+  g.fillRect(44, 32, 7, 20); // front right
+  // tail
+  g.fillStyle(0x2a1a08, 1);
+  g.fillEllipse(6, 18, 12, 6);
+  // tan markings
+  g.fillStyle(0xc8813a, 0.6);
+  g.fillEllipse(50, 19, 7, 5); // face
+  g.fillEllipse(28, 24, 20, 12); // chest
+  // eye
+  g.fillStyle(0x8B4513, 1); g.fillCircle(52, 14, 3);
+  g.fillStyle(0xffffff, 1); g.fillCircle(53, 13, 1);
+  g.generateTexture('shadow_idle', 64, 52);
+
+  // SHADOW run frame 1
+  g.clear();
+  g.fillStyle(0x2a1a08, 1); g.fillEllipse(28, 22, 46, 26);
+  g.fillStyle(0x1a0d04, 1); g.fillCircle(50, 14, 13);
+  g.fillStyle(0x2a1a0a, 1); g.fillEllipse(58, 18, 12, 7);
+  g.fillStyle(0x1a0d04, 1);
+  g.fillTriangle(42, 3, 46, 16, 50, 3);
+  g.fillTriangle(52, 3, 56, 16, 60, 5);
+  // running legs (spread)
+  g.fillStyle(0x1a0d04, 1);
+  g.fillRect(8, 28, 7, 22); // stretched back
+  g.fillRect(22, 34, 7, 16);
+  g.fillRect(36, 28, 7, 22); // stretched front
+  g.fillRect(50, 34, 7, 16);
+  g.fillStyle(0x2a1a08, 1); g.fillEllipse(5, 16, 10, 5);
+  g.fillStyle(0xc8813a, 0.6); g.fillEllipse(52, 17, 7, 5); g.fillEllipse(28, 22, 20, 11);
+  g.fillStyle(0x8B4513, 1); g.fillCircle(54, 12, 3);
+  g.fillStyle(0xffffff, 1); g.fillCircle(55, 11, 1);
+  g.generateTexture('shadow_run1', 64, 52);
+
+  // SHADOW run frame 2
+  g.clear();
+  g.fillStyle(0x2a1a08, 1); g.fillEllipse(28, 20, 46, 24);
+  g.fillStyle(0x1a0d04, 1); g.fillCircle(50, 12, 13);
+  g.fillStyle(0x2a1a0a, 1); g.fillEllipse(58, 16, 12, 7);
+  g.fillStyle(0x1a0d04, 1);
+  g.fillTriangle(42, 1, 46, 14, 50, 1);
+  g.fillTriangle(52, 1, 56, 14, 60, 3);
+  g.fillStyle(0x1a0d04, 1);
+  g.fillRect(10, 30, 7, 18);
+  g.fillRect(24, 26, 7, 22);
+  g.fillRect(38, 30, 7, 18);
+  g.fillRect(52, 26, 7, 22);
+  g.fillStyle(0x2a1a08, 1); g.fillEllipse(5, 14, 10, 5);
+  g.fillStyle(0xc8813a, 0.6); g.fillEllipse(52, 15, 7, 5); g.fillEllipse(28, 20, 20, 10);
+  g.fillStyle(0x8B4513, 1); g.fillCircle(54, 10, 3);
+  g.fillStyle(0xffffff, 1); g.fillCircle(55, 9, 1);
+  g.generateTexture('shadow_run2', 64, 52);
+
+  // SHADOW jump
+  g.clear();
+  g.fillStyle(0x2a1a08, 1); g.fillEllipse(28, 18, 48, 22);
+  g.fillStyle(0x1a0d04, 1); g.fillCircle(50, 10, 13);
+  g.fillStyle(0x2a1a0a, 1); g.fillEllipse(58, 15, 12, 7);
+  g.fillStyle(0x1a0d04, 1);
+  g.fillTriangle(42, 0, 46, 13, 50, 0);
+  g.fillTriangle(52, 0, 56, 13, 60, 2);
+  // legs tucked
+  g.fillStyle(0x1a0d04, 1);
+  g.fillEllipse(14, 34, 20, 10);
+  g.fillEllipse(42, 34, 20, 10);
+  g.fillStyle(0x2a1a08, 1); g.fillEllipse(3, 14, 10, 5);
+  g.fillStyle(0xc8813a, 0.6); g.fillEllipse(52, 13, 7, 5); g.fillEllipse(28, 18, 20, 10);
+  g.fillStyle(0x8B4513, 1); g.fillCircle(54, 8, 3);
+  g.fillStyle(0xffffff, 1); g.fillCircle(55, 7, 1);
+  g.generateTexture('shadow_jump', 64, 52);
+
+  // ---- GEMMA (puppy) ----
+  g.clear();
+  // body
+  g.fillStyle(0xd4956a, 1); g.fillEllipse(20, 22, 34, 26);
+  // head
+  g.fillStyle(0xe8aa7a, 1); g.fillCircle(32, 14, 12);
+  // snout
+  g.fillStyle(0xf0c090, 1); g.fillEllipse(37, 18, 10, 7);
+  // nose
+  g.fillStyle(0x3a1a0a, 1); g.fillEllipse(39, 16, 5, 4);
+  // eye
+  g.fillStyle(0x3a1a0a, 1); g.fillCircle(30, 12, 3);
+  g.fillStyle(0xffffff, 1); g.fillCircle(31, 11, 1);
+  // ear L
+  g.fillStyle(0xc8813a, 1); g.fillEllipse(22, 8, 9, 14);
+  // ear R
+  g.fillStyle(0xc8813a, 1); g.fillEllipse(36, 7, 9, 13);
+  // legs
+  g.fillStyle(0xd4956a, 1);
+  g.fillRect(10, 30, 6, 14);
+  g.fillRect(18, 30, 6, 14);
+  g.fillRect(28, 30, 6, 14);
+  g.fillRect(36, 30, 6, 14);
+  // tail
+  g.fillStyle(0xd4956a, 1); g.fillEllipse(6, 20, 10, 6);
+  // collar
+  g.fillStyle(0xe83a4a, 1); g.fillRect(24, 22, 16, 4);
+  g.fillStyle(0xf5c87a, 1); g.fillCircle(32, 25, 3);
+  g.generateTexture('gemma', 48, 44);
+
+  // ---- CAGE ----
+  g.clear();
+  g.fillStyle(0x7a6040, 0.3); g.fillRect(2, 2, 60, 60);
+  g.lineStyle(3, 0x8a7050, 1);
+  g.strokeRect(2, 2, 60, 60);
+  // bars
+  g.lineStyle(2, 0x9a8060, 0.9);
+  for (let i = 0; i <= 6; i++) { g.lineBetween(2 + i*10, 2, 2 + i*10, 62); }
+  for (let j = 0; j <= 4; j++) { g.lineBetween(2, 2 + j*15, 62, 2 + j*15); }
+  // door
+  g.lineStyle(2, 0xf5c87a, 0.8); g.strokeRect(22, 12, 20, 40);
+  // padlock
+  g.fillStyle(0xf5c87a, 1); g.fillRect(29, 34, 6, 8);
+  g.lineStyle(2, 0xf5c87a, 1);
+  g.strokeCircle(32, 32, 5);
+  g.generateTexture('cage', 64, 64);
+
+  // ---- SNAKE ----
+  g.clear();
+  // body segments
+  g.fillStyle(0x3a7a2a, 1);
+  for (let i = 0; i < 5; i++) {
+    g.fillEllipse(8 + i * 12, 18 + Math.sin(i) * 3, 18, 12);
+  }
+  // head
+  g.fillStyle(0x2a6a1a, 1); g.fillEllipse(68, 16, 22, 14);
+  // eye
+  g.fillStyle(0xffff00, 1); g.fillCircle(74, 13, 3);
+  g.fillStyle(0x1a0a0a, 1); g.fillCircle(75, 13, 2);
+  // tongue
+  g.fillStyle(0xff2244, 1);
+  g.fillRect(76, 15, 8, 2);
+  g.fillRect(82, 13, 3, 2); g.fillRect(82, 17, 3, 2);
+  // stripes
+  g.fillStyle(0x2a5a1a, 0.5);
+  for (let i = 0; i < 4; i++) g.fillRect(14 + i * 12, 14, 4, 8);
+  g.generateTexture('snake', 90, 30);
+
+  // ---- BERRY ----
+  g.clear();
+  g.fillStyle(0xcc2244, 1); g.fillCircle(8, 9, 7);
+  g.fillStyle(0xee4466, 0.5); g.fillCircle(6, 7, 3);
+  g.fillStyle(0x2a5a1a, 1); g.fillRect(7, 2, 2, 5);
+  g.generateTexture('berry', 16, 16);
+
+  // ---- KEY ----
+  g.clear();
+  g.fillStyle(0xf5c87a, 1); g.fillCircle(7, 7, 7);
+  g.fillStyle(0xf5c87a, 1); g.fillRect(12, 6, 14, 3);
+  g.fillStyle(0xf5c87a, 1); g.fillRect(20, 9, 3, 5); g.fillRect(24, 9, 3, 4);
+  g.fillStyle(0x1a0a00, 1); g.fillCircle(7, 7, 3);
+  g.generateTexture('key', 30, 16);
+
+  // ---- HEART ----
+  g.clear();
+  g.fillStyle(0xff3355, 1);
+  g.fillCircle(8, 7, 6); g.fillCircle(16, 7, 6);
+  g.fillTriangle(2, 10, 12, 22, 22, 10);
+  g.generateTexture('heart', 24, 22);
+
+  // ---- LOG (platform) ----
+  g.clear();
+  g.fillStyle(0x7a4e2a, 1); g.fillRect(0, 0, 90, 22);
+  g.fillStyle(0x5c3a18, 1); g.fillRect(0, 0, 90, 4); g.fillRect(0, 18, 90, 4);
+  // grain lines
+  g.lineStyle(1, 0x5c3a18, 0.4);
+  for (let i = 0; i < 9; i++) g.lineBetween(i*10, 0, i*10, 22);
+  // ring pattern on ends
+  g.fillStyle(0x9a6a3a, 0.3); g.fillEllipse(8, 11, 12, 18);
+  g.generateTexture('log', 90, 22);
+
+  // ---- SWITCH ----
+  g.clear();
+  g.fillStyle(0x5a4030, 1); g.fillRect(0, 0, 24, 32);
+  g.fillStyle(0xf5c87a, 1); g.fillRect(8, 6, 8, 16);
+  g.fillStyle(0x44aa44, 1); g.fillCircle(12, 8, 4);
+  g.generateTexture('switch_off', 24, 32);
+  g.clear();
+  g.fillStyle(0x5a4030, 1); g.fillRect(0, 0, 24, 32);
+  g.fillStyle(0xf5c87a, 1); g.fillRect(8, 10, 8, 16);
+  g.fillStyle(0xee4422, 1); g.fillCircle(12, 24, 4);
+  g.generateTexture('switch_on', 24, 32);
+
+  // ---- PARTICLE: LEAF ----
+  g.clear();
+  g.fillStyle(0x4a9a4a, 0.8);
+  g.fillEllipse(5, 7, 8, 12);
+  g.generateTexture('leaf', 10, 14);
+
+  // ---- PARTICLE: DUST ----
+  g.clear();
+  g.fillStyle(0xd4aa70, 0.6); g.fillCircle(4, 4, 4);
+  g.generateTexture('dust', 8, 8);
+
+  // ---- UI BG ----
+  g.clear();
+  g.fillStyle(0x2a1a0a, 0.85); g.fillRoundedRect(0, 0, 400, 120, 12);
+  g.lineStyle(2, 0xf5c87a, 0.6); g.strokeRoundedRect(1, 1, 398, 118, 12);
+  g.generateTexture('dialog_bg', 400, 120);
+
+  // ---- BUTTON ----
+  g.clear();
+  g.fillStyle(0x8B4513, 1); g.fillRoundedRect(0, 0, 180, 48, 10);
+  g.fillStyle(0xa0522d, 0.7); g.fillRoundedRect(4, 4, 172, 20, 6);
+  g.lineStyle(2, 0xf5c87a, 0.8); g.strokeRoundedRect(1, 1, 178, 46, 10);
+  g.generateTexture('button_bg', 180, 48);
+
+  // ---- FOG ----
+  g.clear();
+  for (let i = 0; i < 5; i++) {
+    g.fillStyle(0xd4c8b4, 0.04 + i * 0.015);
+    g.fillEllipse(100 + i * 120, 30, 200, 60);
+  }
+  g.generateTexture('fog', 800, 80);
+
+  // ---- BACKGROUND MOUNTAINS ----
+  g.clear();
+  g.fillStyle(0x2a3a2a, 0.6);
+  g.fillTriangle(0, 200, 150, 60, 300, 200);
+  g.fillTriangle(200, 200, 380, 40, 560, 200);
+  g.fillTriangle(450, 200, 600, 70, 750, 200);
+  g.fillStyle(0x1a2a1a, 0.4);
+  g.fillTriangle(50, 200, 200, 80, 350, 200);
+  g.fillTriangle(300, 200, 480, 50, 660, 200);
+  g.generateTexture('mountains', 800, 200);
+
+  // ---- FALLEN TREE (climbable) ----
+  g.clear();
+  g.fillStyle(0x6a4020, 1); g.fillRect(0, 8, 120, 18);
+  g.fillStyle(0x4a2a10, 1); g.fillRect(0, 8, 120, 5);
+  // branches
+  g.fillStyle(0x5a3018, 1);
+  g.fillRect(20, 0, 5, 12); g.fillRect(50, 0, 5, 14); g.fillRect(80, 0, 5, 10);
+  g.lineStyle(1, 0x3a1a08, 0.4);
+  for (let i = 0; i < 12; i++) g.lineBetween(i * 10, 8, i * 10, 26);
+  g.generateTexture('fallen_tree', 120, 26);
+
+  // ---- RAIN DROP ----
+  g.clear();
+  g.fillStyle(0x7ab4d4, 0.6); g.fillRect(0, 0, 1, 8);
+  g.generateTexture('raindrop', 2, 8);
+
+  // ---- STAR/SPARKLE ----
+  g.clear();
+  g.fillStyle(0xf5e87a, 0.9);
+  g.fillRect(3, 0, 2, 8); g.fillRect(0, 3, 8, 2);
+  g.fillStyle(0xffffff, 0.6);
+  g.fillRect(3, 2, 2, 4); g.fillRect(2, 3, 4, 2);
+  g.generateTexture('sparkle', 8, 8);
+
+  g.destroy();
+}
+
+// ============================================================
+// SCENE: BOOT
+// ============================================================
+class BootScene extends Phaser.Scene {
+  constructor() { super('Boot'); }
+  create() {
+    generateAssets(this);
+    this.scene.start('Menu');
+    // animate loading bar
+    let pct = 0;
+    const iv = setInterval(() => {
+      pct = Math.min(pct + 8, 100);
+      document.getElementById('load-bar').style.width = pct + '%';
+      const tips = ['Waking Shadow up...', 'Brewing forest magic...', 'Hiding berries...', 'Training the snake...', 'Almost ready...'];
+      document.getElementById('load-tip').textContent = tips[Math.floor(pct/22)] || 'Almost ready...';
+      if (pct >= 100) { clearInterval(iv); setTimeout(() => {
+        const ls = document.getElementById('loading-screen');
+        ls.style.opacity = '0';
+        setTimeout(() => ls.remove(), 1000);
+      }, 400); }
+    }, 40);
+  }
+}
+
+// ============================================================
+// SCENE: MENU
+// ============================================================
+class MenuScene extends Phaser.Scene {
+  constructor() { super('Menu'); }
+
+  create() {
+    this.cameras.main.setBackgroundColor('#1a0a05');
+
+    // sky
+    this.add.image(400, 140, 'sky').setDisplaySize(800, 280).setAlpha(0.9);
+    this.add.image(400, 320, 'mountains').setDisplaySize(800, 200).setAlpha(0.7);
+
+    // trees background
+    for (let i = 0; i < 8; i++) {
+      this.add.image(80 + i * 100, 320, 'tree').setAlpha(0.6 + Math.random()*0.3).setScale(1.2 + Math.random()*0.5);
+    }
+
+    // ground
+    for (let x = 0; x < 800; x += 32)
+      this.add.image(x + 16, 434, 'ground').setDisplaySize(32, 32);
+
+    // fog layers
+    for (let i = 0; i < 3; i++)
+      this.add.image(400, 360 + i * 20, 'fog').setAlpha(0.4 + i * 0.1).setScrollFactor(0);
+
+    // rain particles (light)
+    this.rainParticles = [];
+    for (let i = 0; i < 60; i++) {
+      const r = this.add.image(Math.random() * 800, Math.random() * 450, 'raindrop');
+      r.setAlpha(0.3 + Math.random() * 0.2);
+      this._rainData = this._rainData || [];
+      this._rainData.push({ img: r, speed: 3 + Math.random() * 2 });
+    }
+
+    // Title
+    const titleText = this.add.text(400, 130, "Gemma's Story", {
+      fontSize: '44px', fontFamily: 'Georgia, serif',
+      color: '#f5c87a',
+      stroke: '#2a1008', strokeThickness: 5,
+      shadow: { x: 2, y: 4, color: '#000', blur: 8, fill: true }
+    }).setOrigin(0.5);
+
+    const sub = this.add.text(400, 185, '✦ A Bond of Love, A Life Saved ✦', {
+      fontSize: '14px', fontFamily: 'Georgia, serif',
+      color: '#c9956b', stroke: '#1a0a00', strokeThickness: 2
+    }).setOrigin(0.5);
+
+    // Characters displayed
+    this.add.image(220, 360, 'shadow_idle').setScale(2.5);
+    this.add.image(580, 365, 'gemma').setScale(2.5);
+    this.add.image(400, 370, 'cage').setScale(1.8).setAlpha(0.5);
+
+    // Paw prints decoration
+    const pawTxt = this.add.text(400, 215, '🐾', { fontSize: '20px' }).setOrigin(0.5);
+
+    // Buttons
+    this._makeBtn(400, 268, '▶  Play', () => this.scene.start('Cinematic1'));
+    this._makeBtn(400, 328, '📖  Story', () => this._showStory());
+
+    // Animate title
+    this.tweens.add({ targets: titleText, y: '+=8', duration: 2000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    this.tweens.add({ targets: sub, alpha: { from: 0.6, to: 1 }, duration: 1500, yoyo: true, repeat: -1 });
+
+    // Leaf particles
+    this._spawnLeaf();
+
+    this.time.addEvent({ delay: 400, callback: this._spawnLeaf, callbackScope: this, loop: true });
+  }
+
+  _makeBtn(x, y, label, cb) {
+    const btn = this.add.image(x, y, 'button_bg').setInteractive({ useHandCursor: true }).setScale(1);
+    const txt = this.add.text(x, y, label, {
+      fontSize: '17px', fontFamily: 'Georgia, serif',
+      color: '#f5e0b0', stroke: '#2a1008', strokeThickness: 2
+    }).setOrigin(0.5);
+    btn.on('pointerover', () => { btn.setScale(1.05); txt.setScale(1.05); });
+    btn.on('pointerout', () => { btn.setScale(1); txt.setScale(1); });
+    btn.on('pointerdown', () => { btn.setScale(0.95); txt.setScale(0.95); });
+    btn.on('pointerup', cb);
+    return btn;
+  }
+
+  _showStory() {
+    const overlay = this.add.rectangle(400, 225, 660, 320, 0x0a0502, 0.92).setInteractive();
+    this.add.rectangle(400, 225, 660, 320, 0x000000, 0).setStrokeStyle(2, 0xf5c87a, 0.8);
+    const story = [
+      "In a quiet forest, a tiny puppy named Gemma",
+      "found herself trapped in a cage.",
+      "",
+      "Rain fell softly as a dangerous snake",
+      "slowly circled her prison.",
+      "",
+      "But Gemma was not alone.",
+      "",
+      "Shadow — her loyal German Shepherd guardian —",
+      "spotted the danger from afar.",
+      "",
+      "With courage in his heart,",
+      "he set off through the forest...",
+      "to save the one he loved."
+    ];
+    story.forEach((line, i) => {
+      this.add.text(400, 90 + i * 20, line, {
+        fontSize: '13px', fontFamily: 'Georgia, serif', color: '#e8d0a8',
+        stroke: '#0a0502', strokeThickness: 1
+      }).setOrigin(0.5);
+    });
+    const close = this.add.text(400, 370, '[ Close ]', {
+      fontSize: '14px', fontFamily: 'Georgia, serif', color: '#f5c87a'
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    close.on('pointerup', () => { overlay.destroy(); this.scene.restart(); });
+  }
+
+  _spawnLeaf() {
+    const leaf = this.add.image(Math.random() * 820 - 10, -10, 'leaf');
+    leaf.setAlpha(0.6 + Math.random() * 0.3);
+    leaf.setRotation(Math.random() * Math.PI);
+    this.tweens.add({
+      targets: leaf,
+      y: 460, x: `+=${(Math.random() - 0.5) * 100}`,
+      rotation: `+=${Math.PI * (Math.random() > 0.5 ? 2 : -2)}`,
+      alpha: 0,
+      duration: 3000 + Math.random() * 3000,
+      onComplete: () => leaf.destroy()
+    });
+  }
+
+  update() {
+    if (!this._rainData) return;
+    for (const r of this._rainData) {
+      r.img.y += r.speed;
+      if (r.img.y > 460) { r.img.y = -10; r.img.x = Math.random() * 800; }
+    }
+  }
+}
+
+// ============================================================
+// SCENE: CINEMATIC 1 — Opening Story
+// ============================================================
+class Cinematic1Scene extends Phaser.Scene {
+  constructor() { super('Cinematic1'); }
+  create() {
+    this.cameras.main.setBackgroundColor('#0a0502');
+    this.cameras.main.fadeIn(800, 0, 0, 0);
+
+    const panels = [
+      { text: "A quiet forest...\nRain falls softly.", delay: 0 },
+      { text: "Gemma is trapped.\nScared and alone.", delay: 2200 },
+      { text: "A snake approaches\nher cage... slowly.", delay: 4600 },
+      { text: "But Shadow sees.\nHe won't let her down.", delay: 7200 },
+      { text: "Chapter 1:\n'The Warning'", delay: 9800, title: true }
+    ];
+
+    // Dark cinematic bg
+    this.add.rectangle(400, 225, 800, 450, 0x0d0806);
+
+    // forest silhouette
+    for (let i = 0; i < 10; i++) {
+      const t = this.add.image(-50 + i * 95, 280, 'tree').setAlpha(0.3).setScale(1.5);
+    }
+
+    // rain
+    this._rainData = [];
+    for (let i = 0; i < 80; i++) {
+      const r = this.add.image(Math.random() * 800, Math.random() * 450, 'raindrop');
+      r.setAlpha(0.2 + Math.random() * 0.2);
+      this._rainData.push({ img: r, speed: 4 + Math.random() * 3 });
+    }
+
+    // cage and gemma
+    const cage = this.add.image(480, 330, 'cage').setScale(2.5).setAlpha(0);
+    const gemma = this.add.image(480, 320, 'gemma').setScale(1.8).setAlpha(0);
+    const snake = this.add.image(300, 345, 'snake').setScale(1.5).setAlpha(0);
+    const shadow = this.add.image(100, 350, 'shadow_idle').setScale(2).setAlpha(0);
+
+    // Text overlay
+    this.panelText = this.add.text(400, 60, '', {
+      fontSize: '18px', fontFamily: 'Georgia, serif',
+      color: '#e8d0a8', stroke: '#0a0502', strokeThickness: 3,
+      align: 'center', lineSpacing: 6
+    }).setOrigin(0.5);
+
+    // cinematic bars
+    this.add.rectangle(400, 22, 800, 44, 0x000000, 0.85);
+    this.add.rectangle(400, 428, 800, 44, 0x000000, 0.85);
+
+    // schedule panels
+    panels.forEach((p, i) => {
+      this.time.delayedCall(p.delay, () => {
+        this.cameras.main.fadeIn(400, 0, 0, 0);
+        if (p.title) {
+          this.panelText.setStyle({ fontSize: '24px', color: '#f5c87a' });
+        }
+        this.panelText.setText(p.text);
+        this.tweens.add({ targets: this.panelText, alpha: { from: 0, to: 1 }, duration: 600 });
+
+        if (i === 1) { this.tweens.add({ targets: [cage, gemma], alpha: 1, duration: 800 }); }
+        if (i === 2) { this.tweens.add({ targets: snake, alpha: 1, duration: 800, x: { from: 220, to: 360 } }); }
+        if (i === 3) { this.tweens.add({ targets: shadow, alpha: 1, duration: 800 }); }
+        if (i < panels.length - 1) {
+          this.time.delayedCall(p.delay + 1900, () => {
+            this.tweens.add({ targets: this.panelText, alpha: 0, duration: 400 });
+          });
+        }
+      });
+    });
+
+    // Skip / Start buttons
+    const skipTxt = this.add.text(700, 420, '[ Skip ]', {
+      fontSize: '13px', fontFamily: 'Georgia, serif', color: '#7a6040'
+    }).setInteractive({ useHandCursor: true });
+    skipTxt.on('pointerup', () => this._startGame());
+
+    // Auto advance
+    this.time.delayedCall(11800, () => this._startGame());
+  }
+
+  _startGame() {
+    this.cameras.main.fadeOut(600, 0, 0, 0);
+    this.time.delayedCall(650, () => this.scene.start('Level1'));
+  }
+
+  update() {
+    if (!this._rainData) return;
+    for (const r of this._rainData) {
+      r.img.y += r.speed;
+      if (r.img.y > 460) { r.img.y = -10; r.img.x = Math.random() * 800; }
+    }
+  }
+}
+
+// ============================================================
+// BASE LEVEL SCENE
+// ============================================================
+class BaseLevelScene extends Phaser.Scene {
+
+  initLevel(config) {
+    this.lvlConfig = config;
+    this.cameras.main.setBackgroundColor('#0d0806');
+    this.cameras.main.fadeIn(600, 0, 0, 0);
+
+    // World bounds
+    this.physics.world.setBounds(0, 0, config.worldWidth || 2000, H);
+    this.cameras.main.setBounds(0, 0, config.worldWidth || 2000, H);
+
+    // Parallax layers
+    this._buildBackground(config.worldWidth || 2000);
+
+    // Ground
+    this.groundGroup = this.physics.add.staticGroup();
+    this._buildGround(config);
+
+    // Platforms
+    this.platGroup = this.physics.add.staticGroup();
+    if (config.platforms) {
+      config.platforms.forEach(p => {
+        const pl = this.platGroup.create(p.x, p.y, p.key || 'platform');
+        pl.setDisplaySize(p.w || 80, p.h || 20).refreshBody();
+        if (p.key === 'log') pl.setDisplaySize(90, 22).refreshBody();
+      });
+    }
+
+    // Rocks
+    this.rockGroup = this.physics.add.group({ allowGravity: false });
+    this._rocks = {};
+    if (config.rocks) {
+      config.rocks.forEach((r, i) => {
+        const rock = this.rockGroup.create(r.x, r.y, 'rock');
+        rock.setCollideWorldBounds(true);
+        rock.setImmovable(r.immovable !== false);
+        rock.setData('id', i);
+        if (!r.immovable) rock.body.setAllowGravity(false);
+        this._rocks[i] = rock;
+      });
+    }
+
+    // Player — Shadow
+    this.shadow = this.physics.add.sprite(config.startX || 80, config.startY || 380, 'shadow_idle');
+    this.shadow.setScale(1.8);
+    this.shadow.setCollideWorldBounds(true);
+    this.shadow.setGravityY(200);
+    this.shadow.setDepth(10);
+    this._onGround = false;
+    this._pushing = false;
+    this._pushDir = 0;
+
+    // Anims
+    if (!this.anims.exists('shadow_walk')) {
+      this.anims.create({ key: 'shadow_walk', frames: [{ key: 'shadow_run1' }, { key: 'shadow_run2' }], frameRate: 8, repeat: -1 });
+      this.anims.create({ key: 'shadow_idle_anim', frames: [{ key: 'shadow_idle' }], frameRate: 1, repeat: -1 });
+      this.anims.create({ key: 'shadow_jump_anim', frames: [{ key: 'shadow_jump' }], frameRate: 1, repeat: -1 });
+    }
+
+    // Camera follow
+    this.cameras.main.startFollow(this.shadow, true, 0.08, 0.08);
+
+    // Colliders
+    this.physics.add.collider(this.shadow, this.groundGroup);
+    this.physics.add.collider(this.shadow, this.platGroup);
+    this.physics.add.collider(this.shadow, this.rockGroup);
+    this.physics.add.collider(this.rockGroup, this.groundGroup);
+    this.physics.add.collider(this.rockGroup, this.platGroup);
+
+    // Input
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.wasd = this.input.keyboard.addKeys({ up: Phaser.Input.Keyboard.KeyCodes.W, left: Phaser.Input.Keyboard.KeyCodes.A, right: Phaser.Input.Keyboard.KeyCodes.D, space: Phaser.Input.Keyboard.KeyCodes.SPACE, bark: Phaser.Input.Keyboard.KeyCodes.B });
+
+    // Touch controls
+    this._buildTouchControls();
+
+    // HUD
+    this._buildHUD(config);
+
+    // Leaf particles
+    this.time.addEvent({ delay: 600, callback: this._spawnLeaf, callbackScope: this, loop: true });
+
+    // Fog
+    this._fogLayer = this.add.image(400, 380, 'fog').setScrollFactor(0.1).setAlpha(0.5).setDepth(20);
+
+    // Objective popup
+    this.time.delayedCall(500, () => this._showObjective(config.objective));
+  }
+
+  _buildBackground(worldW) {
+    // Sky repeating
+    const skyCount = Math.ceil(worldW / 800) + 1;
+    for (let i = 0; i < skyCount; i++) {
+      this.add.image(i * 800 + 400, 140, 'sky').setDisplaySize(800, 280).setScrollFactor(0.2).setDepth(-10);
+    }
+    // Mountains
+    for (let i = 0; i < skyCount; i++) {
+      this.add.image(i * 800 + 400, 340, 'mountains').setDisplaySize(800, 200).setScrollFactor(0.4).setDepth(-8).setAlpha(0.7);
+    }
+    // Background trees
+    const treeCount = Math.ceil(worldW / 90);
+    for (let i = 0; i < treeCount; i++) {
+      this.add.image(45 + i * 90, 320, 'tree')
+        .setScrollFactor(0.5 + Math.random() * 0.2)
+        .setScale(0.9 + Math.random() * 0.6)
+        .setAlpha(0.5 + Math.random() * 0.3)
+        .setDepth(-5);
+    }
+  }
+
+  _buildGround(config) {
+    const worldW = config.worldWidth || 2000;
+    // Main ground
+    const gaps = config.gaps || [];
+    let x = 0;
+    while (x < worldW) {
+      const inGap = gaps.some(g => x + 16 > g.x && x < g.x + g.w);
+      if (!inGap) {
+        const tile = this.groundGroup.create(x + 16, H - 16, 'ground');
+        tile.setDisplaySize(32, 32).refreshBody();
+      }
+      x += 32;
+    }
+  }
+
+  _buildHUD(config) {
+    // Chapter name
+    this._hudChapter = this.add.text(W / 2, 22, config.chapterName || '', {
+      fontSize: '16px', fontFamily: 'Georgia, serif',
+      color: '#f5c87a', stroke: '#1a0802', strokeThickness: 3
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(30);
+
+    // Hearts
+    this._hearts = [];
+    for (let i = 0; i < 3; i++) {
+      this._hearts.push(this.add.image(20 + i * 26, 22, 'heart').setScale(0.8).setScrollFactor(0).setDepth(30));
+    }
+
+    // Progress bar
+    this.add.rectangle(W / 2, H - 12, 200, 8, 0x2a1a0a, 0.8).setScrollFactor(0).setDepth(30);
+    this._progressBar = this.add.rectangle(W / 2 - 100, H - 12, 0, 8, 0xf5c87a, 1).setOrigin(0, 0.5).setScrollFactor(0).setDepth(31);
+    this._progressMax = config.worldWidth || 2000;
+  }
+
+  _showObjective(text) {
+    const bg = this.add.rectangle(W / 2, H / 2, 500, 100, 0x1a0d06, 0.9).setScrollFactor(0).setDepth(50);
+    bg.setStrokeStyle(2, 0xf5c87a, 0.7);
+    const title = this.add.text(W / 2, H / 2 - 18, '🐾 Mission', {
+      fontSize: '13px', fontFamily: 'Georgia, serif', color: '#c9956b'
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(51);
+    const txt = this.add.text(W / 2, H / 2 + 10, text, {
+      fontSize: '16px', fontFamily: 'Georgia, serif', color: '#f5e0b0',
+      stroke: '#0a0502', strokeThickness: 2, align: 'center'
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(51);
+    this.tweens.add({ targets: [bg, title, txt], alpha: 0, delay: 2800, duration: 600, onComplete: () => { bg.destroy(); title.destroy(); txt.destroy(); } });
+  }
+
+  _buildTouchControls() {
+    const touchY = H - 45;
+    const btnStyle = { fontSize: '22px', color: '#f5e0b0', backgroundColor: 'rgba(40,20,5,0.7)', padding: { x: 14, y: 8 } };
+
+    this._touchLeft = this.add.text(30, touchY, '◀', btnStyle).setScrollFactor(0).setDepth(40).setInteractive();
+    this._touchRight = this.add.text(90, touchY, '▶', btnStyle).setScrollFactor(0).setDepth(40).setInteractive();
+    this._touchJump = this.add.text(W - 80, touchY, '🦘', btnStyle).setScrollFactor(0).setDepth(40).setInteractive();
+    this._touchBark = this.add.text(W - 150, touchY, '🐕', btnStyle).setScrollFactor(0).setDepth(40).setInteractive();
+
+    this._touchState = { left: false, right: false, jump: false, bark: false };
+
+    this._touchLeft.on('pointerdown', () => this._touchState.left = true).on('pointerup', () => this._touchState.left = false).on('pointerout', () => this._touchState.left = false);
+    this._touchRight.on('pointerdown', () => this._touchState.right = true).on('pointerup', () => this._touchState.right = false).on('pointerout', () => this._touchState.right = false);
+    this._touchJump.on('pointerdown', () => { this._touchState.jump = true; }).on('pointerup', () => this._touchState.jump = false);
+    this._touchBark.on('pointerdown', () => { this._doBark(); });
+    this.input.addPointer(3);
+  }
+
+  _spawnLeaf() {
+    const leaf = this.add.image(this.cameras.main.scrollX + Math.random() * 820, -10, 'leaf');
+    leaf.setAlpha(0.5 + Math.random() * 0.3).setDepth(15);
+    this.tweens.add({
+      targets: leaf,
+      y: H + 20,
+      x: `+=${(Math.random() - 0.5) * 120}`,
+      rotation: `+=${Math.PI * (Math.random() > 0.5 ? 3 : -3)}`,
+      alpha: 0,
+      duration: 3500 + Math.random() * 2500,
+      onComplete: () => leaf.destroy()
+    });
+  }
+
+  _doBark() {
+    // Create bark visual effect
+    const bx = this.shadow.x + (this.shadow.flipX ? -60 : 60);
+    const bark = this.add.text(bx, this.shadow.y - 40, 'WOOF!', {
+      fontSize: '18px', fontFamily: 'Georgia, serif', color: '#f5c87a',
+      stroke: '#2a1008', strokeThickness: 3
+    }).setDepth(20);
+    this.tweens.add({ targets: bark, y: bark.y - 30, alpha: 0, duration: 800, onComplete: () => bark.destroy() });
+    // Bark circles
+    for (let i = 0; i < 3; i++) {
+      const circle = this.add.circle(bx, this.shadow.y - 20, 10 + i * 12, 0xf5c87a, 0.3 - i * 0.08).setDepth(19);
+      this.tweens.add({ targets: circle, scaleX: 2, scaleY: 2, alpha: 0, duration: 500 + i * 100, onComplete: () => circle.destroy() });
+    }
+    if (this.onBark) this.onBark();
+  }
+
+  updateMovement() {
+    const s = this.shadow;
+    const body = s.body;
+    const onG = body.blocked.down;
+    this._onGround = onG;
+
+    const left = this.cursors.left.isDown || this.wasd.left.isDown || (this._touchState && this._touchState.left);
+    const right = this.cursors.right.isDown || this.wasd.right.isDown || (this._touchState && this._touchState.right);
+    const jump = Phaser.Input.Keyboard.JustDown(this.cursors.up) || Phaser.Input.Keyboard.JustDown(this.wasd.up) || Phaser.Input.Keyboard.JustDown(this.wasd.space) || (this._touchState && this._touchState.jump && onG);
+    const bark = Phaser.Input.Keyboard.JustDown(this.wasd.bark);
+
+    const speed = 200;
+
+    if (left) {
+      s.setVelocityX(-speed);
+      s.setFlipX(true);
+      if (onG) s.play('shadow_walk', true);
+      this._spawnDust(s.x + 10, s.y + 20);
+    } else if (right) {
+      s.setVelocityX(speed);
+      s.setFlipX(false);
+      if (onG) s.play('shadow_walk', true);
+      this._spawnDust(s.x - 10, s.y + 20);
+    } else {
+      s.setVelocityX(0);
+      if (onG) s.play('shadow_idle_anim', true);
+    }
+
+    if (jump && onG) {
+      s.setVelocityY(-320);
+      s.play('shadow_jump_anim', true);
+      this._spawnDust(s.x, s.y + 20, true);
+    }
+    if (!onG) s.play('shadow_jump_anim', true);
+
+    if (bark) this._doBark();
+
+    // Touch jump one-shot
+    if (this._touchState && this._touchState.jump) {
+      this._touchState.jump = false;
+    }
+
+    // Update progress bar
+    if (this._progressBar && this._progressMax) {
+      const pct = Math.min(s.x / this._progressMax, 1);
+      this._progressBar.width = 200 * pct;
+    }
+  }
+
+  _spawnDust(x, y, big = false) {
+    if (Math.random() > 0.3) return;
+    const d = this.add.image(x, y, 'dust').setDepth(8);
+    this.tweens.add({
+      targets: d,
+      y: y - (big ? 20 : 10),
+      x: `+=${(Math.random() - 0.5) * 20}`,
+      alpha: 0,
+      scale: big ? 2 : 1,
+      duration: 400 + Math.random() * 200,
+      onComplete: () => d.destroy()
+    });
+  }
+
+  _pushRock(rock) {
+    const dx = rock.x - this.shadow.x;
+    const pushX = dx > 0 ? 80 : -80;
+    if (!rock.getData('pushed')) {
+      rock.setData('pushed', true);
+      rock.setImmovable(false);
+      rock.body.setAllowGravity(true);
+      this.tweens.add({ targets: rock, x: rock.x + pushX, duration: 600, ease: 'Power2' });
+      // Push effect
+      const arrow = this.add.text(rock.x + pushX / 2, rock.y - 30, dx > 0 ? '→ PUSH! →' : '← PUSH! ←', {
+        fontSize: '14px', fontFamily: 'Georgia, serif', color: '#f5c87a'
+      }).setDepth(25);
+      this.tweens.add({ targets: arrow, y: arrow.y - 20, alpha: 0, duration: 700, onComplete: () => arrow.destroy() });
+    }
+  }
+
+  _showMessage(text, duration = 2000) {
+    const bg = this.add.rectangle(W / 2, 80, 500, 50, 0x1a0d06, 0.88).setScrollFactor(0).setDepth(50);
+    bg.setStrokeStyle(2, 0xf5c87a, 0.6);
+    const txt = this.add.text(W / 2, 80, text, {
+      fontSize: '15px', fontFamily: 'Georgia, serif', color: '#e8d0a8', align: 'center'
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(51);
+    this.tweens.add({ targets: [bg, txt], alpha: 0, delay: duration, duration: 500, onComplete: () => { bg.destroy(); txt.destroy(); } });
+  }
+
+  _completeLevel(nextScene, message = "Level Complete!") {
+    this.physics.pause();
+    this.cameras.main.shake(300, 0.01);
+
+    // Sparkle burst
+    for (let i = 0; i < 12; i++) {
+      const sp = this.add.image(this.shadow.x + (Math.random() - 0.5) * 80, this.shadow.y + (Math.random() - 0.5) * 80, 'sparkle').setDepth(60);
+      this.tweens.add({ targets: sp, x: sp.x + (Math.random() - 0.5) * 100, y: sp.y - 50 - Math.random() * 50, alpha: 0, scale: 1.5, duration: 800, onComplete: () => sp.destroy() });
+    }
+
+    const bg = this.add.rectangle(W / 2, H / 2, 500, 140, 0x1a0d06, 0.95).setScrollFactor(0).setDepth(70);
+    bg.setStrokeStyle(2, 0xf5c87a, 0.8);
+    this.add.text(W / 2, H / 2 - 28, '🐾 ' + message, {
+      fontSize: '22px', fontFamily: 'Georgia, serif', color: '#f5c87a',
+      stroke: '#1a0802', strokeThickness: 3
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(71);
+
+    const cont = this.add.text(W / 2, H / 2 + 28, '[ Continue the Journey ]', {
+      fontSize: '16px', fontFamily: 'Georgia, serif', color: '#e8d0a8'
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(71).setInteractive({ useHandCursor: true });
+    cont.on('pointerup', () => {
+      this.cameras.main.fadeOut(600, 0, 0, 0);
+      this.time.delayedCall(650, () => this.scene.start(nextScene));
+    });
+
+    this.tweens.add({ targets: cont, alpha: { from: 0.4, to: 1 }, duration: 800, yoyo: true, repeat: -1 });
+  }
+}
+
+// ============================================================
+// LEVEL 1 — The Warning
+// ============================================================
+class Level1Scene extends BaseLevelScene {
+  constructor() { super('Level1'); }
+
+  create() {
+    const config = {
+      worldWidth: 2200,
+      startX: 80, startY: 360,
+      chapterName: 'Chapter 1 — The Warning',
+      objective: 'Reach Gemma\'s cage!\nJump, push rocks, and climb!',
+      platforms: [
+        { x: 320, y: 360, w: 90, h: 20 },
+        { x: 500, y: 320, w: 80, h: 20 },
+        { x: 700, y: 370, w: 90, h: 20 },
+        { x: 900, y: 300, w: 80, h: 20, key: 'log' },
+        { x: 1100, y: 350, w: 90, h: 20 },
+        { x: 1300, y: 310, w: 80, h: 20 },
+        { x: 1500, y: 350, w: 90, h: 20 },
+        { x: 1700, y: 290, w: 80, h: 20, key: 'log' },
+      ],
+      rocks: [
+        { x: 420, y: 385, immovable: false },
+        { x: 800, y: 395, immovable: false },
+        { x: 1200, y: 395, immovable: false },
+      ],
+      gaps: [
+        { x: 580, w: 80 },
+        { x: 1050, w: 70 },
+      ]
+    };
+
+    this.initLevel(config);
+
+    // Rain effect
+    this._rainData = [];
+    for (let i = 0; i < 70; i++) {
+      const r = this.add.image(Math.random() * 800, Math.random() * 450, 'raindrop').setScrollFactor(0).setAlpha(0.25).setDepth(25);
+      this._rainData.push({ img: r, speed: 4 + Math.random() * 2 });
+    }
+
+    // GOAL: Gemma's cage at end
+    this.cage = this.physics.add.staticImage(2100, 360, 'cage').setScale(2).setDepth(8);
+    this.gemmaGoal = this.add.image(2100, 348, 'gemma').setScale(1.5).setDepth(9);
+
+    // Snake (enemy, circling cage)
+    this.snake = this.add.image(1950, 372, 'snake').setScale(1.6).setDepth(9);
+    this._snakeDir = 1;
+    this._snakeTween = this.tweens.add({
+      targets: this.snake, x: '+=120', duration: 2000, yoyo: true, repeat: -1,
+      onUpdate: (t) => { this.snake.setFlipX(this._snakeDir < 0); this._snakeDir = t.progress > 0.5 ? -1 : 1; }
+    });
+
+    // Switches puzzle
+    this._switch1 = this.physics.add.staticImage(1380, 375, 'switch_off').setDepth(8);
+    this._switch1Done = false;
+
+    // Overlap: shadow reaches cage
+    this.physics.add.overlap(this.shadow, this.cage, () => {
+      if (!this._levelDone) {
+        this._levelDone = true;
+        this._onReachGemma();
+      }
+    });
+
+    // Overlap with switch
+    this.physics.add.overlap(this.shadow, this._switch1, () => {
+      if (!this._switch1Done) {
+        this._switch1Done = true;
+        this._switch1.setTexture('switch_on');
+        this._showMessage('Switch activated! Path opened! 🎯');
+        // Remove gap (spawn ground tiles)
+        for (let x = 1050; x < 1120; x += 32) {
+          const tile = this.groundGroup.create(x + 16, H - 16, 'ground');
+          tile.setDisplaySize(32, 32).refreshBody();
+          const twn = this.add.image(x + 16, H - 30, 'sparkle').setDepth(15);
+          this.tweens.add({ targets: twn, alpha: 0, y: twn.y - 20, duration: 600, onComplete: () => twn.destroy() });
+        }
+      }
+    });
+
+    // Rock push hint
+    this.time.delayedCall(1200, () => this._showMessage('Tip: Walk into rocks to push them! Jump with ↑ or W'));
+  }
+
+  _onReachGemma() {
+    // Shadow comforts Gemma animation
+    this.snake && this._snakeTween && this._snakeTween.stop();
+    if (this.snake) {
+      this.tweens.add({ targets: this.snake, x: '+=200', alpha: 0, duration: 1000 });
+    }
+    // Gemma happy animation
+    this.tweens.add({ targets: this.gemmaGoal, y: '-=10', duration: 300, yoyo: true, repeat: 3 });
+    // Hearts
+    for (let i = 0; i < 5; i++) {
+      this.time.delayedCall(i * 200, () => {
+        const h = this.add.image(2100 + (Math.random() - 0.5) * 60, 320 + Math.random() * 20, 'heart').setDepth(60).setScale(0.8);
+        this.tweens.add({ targets: h, y: h.y - 50, alpha: 0, duration: 1000, onComplete: () => h.destroy() });
+      });
+    }
+    this.time.delayedCall(1200, () => {
+      this._completeLevel('Level2', 'Shadow reached Gemma! 💛\nShe\'s safe... for now.');
+    });
+  }
+
+  update() {
+    this.updateMovement();
+    // Rain
+    if (this._rainData) {
+      for (const r of this._rainData) {
+        r.img.y += r.speed;
+        if (r.img.y > 460) { r.img.y = -10; r.img.x = Math.random() * 800; }
+      }
+    }
+    // Rock pushing by proximity
+    if (this._rocks) {
+      Object.values(this._rocks).forEach(rock => {
+        if (!rock.getData('pushed')) {
+          const dist = Phaser.Math.Distance.Between(this.shadow.x, this.shadow.y, rock.x, rock.y);
+          if (dist < 42) this._pushRock(rock);
+        }
+      });
+    }
+  }
+}
+
+// ============================================================
+// LEVEL 2 — Hungry Little Gemma
+// ============================================================
+class Level2Scene extends BaseLevelScene {
+  constructor() { super('Level2'); }
+
+  create() {
+    const config = {
+      worldWidth: 2400,
+      startX: 80, startY: 360,
+      chapterName: 'Chapter 2 — Hungry Little Gemma',
+      objective: 'Collect 5 berries for Gemma!\nCross the river and return!',
+      platforms: [
+        { x: 200, y: 370 }, { x: 350, y: 340 },
+        { x: 510, y: 370 }, { x: 650, y: 320 },
+        { x: 820, y: 370 }, { x: 980, y: 300, key: 'log' },
+        { x: 1200, y: 350 }, { x: 1400, y: 310 },
+        { x: 1600, y: 360 }, { x: 1800, y: 320, key: 'log' },
+        { x: 2000, y: 350 }, { x: 2200, y: 370 },
+        // stepping stones over river
+        { x: 700, y: 390, w: 50, h: 14 },
+        { x: 780, y: 390, w: 50, h: 14 },
+        { x: 860, y: 390, w: 50, h: 14 },
+      ],
+      rocks: [
+        { x: 450, y: 395 }, { x: 1100, y: 395 }, { x: 1700, y: 395 },
+      ],
+      gaps: [
+        { x: 640, w: 260 }, // river
+      ]
+    };
+
+    this.initLevel(config);
+
+    // Berries scattered across level
+    this._berries = [];
+    const berryPositions = [
+      { x: 360, y: 320 }, { x: 650, y: 295 }, { x: 1000, y: 270 },
+      { x: 1400, y: 280 }, { x: 2000, y: 320 }, { x: 2200, y: 345 }, { x: 1800, y: 290 }
+    ];
+    berryPositions.forEach((bp, i) => {
+      const berry = this.physics.add.staticImage(bp.x, bp.y, 'berry').setScale(1.5).setDepth(8);
+      berry.setData('id', i);
+      this._berries.push(berry);
+      // Floating bob
+      this.tweens.add({ targets: berry, y: bp.y - 6, duration: 800 + i * 120, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    });
+
+    // Berry counter
+    this._berryCount = 0;
+    this._berryNeeded = 5;
+    this._berryTxt = this.add.text(W - 20, 18, `🍓 0 / 5`, {
+      fontSize: '16px', fontFamily: 'Georgia, serif', color: '#f5e0b0',
+      stroke: '#1a0802', strokeThickness: 2
+    }).setOrigin(1, 0.5).setScrollFactor(0).setDepth(35);
+
+    // Gemma waiting at far left (start)
+    this.gemmaGoal = this.physics.add.staticImage(160, 360, 'gemma').setScale(1.8).setDepth(8);
+    this._gemmaAnim = this.tweens.add({ targets: this.gemmaGoal, y: '+=6', duration: 700, yoyo: true, repeat: -1 });
+
+    // Key to bring berries back
+    this._berryReturned = false;
+
+    // River visual
+    this._riverTiles = [];
+    for (let x = 640; x < 900; x += 20) {
+      const w = this.add.rectangle(x, H - 12, 22, 22, 0x2a6aaa, 0.7).setDepth(3);
+      this._riverTiles.push(w);
+      this.tweens.add({ targets: w, alpha: 0.4 + Math.random() * 0.3, duration: 500 + Math.random() * 500, yoyo: true, repeat: -1 });
+    }
+
+    // Thorn bushes (obstacles)
+    this._thorns = [];
+    [500, 1300, 1900].forEach(tx => {
+      const thorn = this.add.text(tx, 378, '🌵', { fontSize: '24px' }).setDepth(9);
+      this._thorns.push({ x: tx - 12, y: 370, w: 30, h: 30 });
+    });
+
+    // Overlaps
+    this._berries.forEach(berry => {
+      this.physics.add.overlap(this.shadow, berry, () => {
+        if (!berry.getData('collected')) {
+          berry.setData('collected', true);
+          berry.destroy();
+          this._berryCount++;
+          this._berryTxt.setText(`🍓 ${this._berryCount} / 5`);
+          this._showMessage(`Berry collected! ${this._berryCount}/5 🍓`);
+          // sparkle
+          const sp = this.add.image(berry.x, berry.y, 'sparkle').setDepth(20);
+          this.tweens.add({ targets: sp, scale: 2, alpha: 0, duration: 400, onComplete: () => sp.destroy() });
+          if (this._berryCount >= this._berryNeeded) {
+            this._showMessage('Got enough berries! Return to Gemma! 🏃');
+          }
+        }
+      });
+    });
+
+    // Reach Gemma with berries
+    this.physics.add.overlap(this.shadow, this.gemmaGoal, () => {
+      if (!this._levelDone && this._berryCount >= this._berryNeeded) {
+        this._levelDone = true;
+        this._onFeedGemma();
+      } else if (!this._levelDone && !this._hintedReturn) {
+        this._hintedReturn = true;
+        this._showMessage('Collect 5 berries first! 🍓');
+      }
+    });
+  }
+
+  _onFeedGemma() {
+    // Gemma eats berries
+    this.tweens.add({ targets: this.gemmaGoal, y: '+=0', scaleX: 2.2, scaleY: 2.2, duration: 300, yoyo: true });
+    for (let i = 0; i < 6; i++) {
+      this.time.delayedCall(i * 150, () => {
+        const b = this.add.image(160 + (Math.random() - 0.5) * 40, 350, 'berry').setDepth(60);
+        this.tweens.add({ targets: b, y: b.y - 40, x: b.x + (Math.random() - 0.5) * 30, alpha: 0, duration: 700, onComplete: () => b.destroy() });
+      });
+    }
+    this.time.delayedCall(1200, () => {
+      this._completeLevel('Level3', 'Gemma is fed! 🍓💛\nShe\'s stronger now!');
+    });
+  }
+
+  update() {
+    this.updateMovement();
+    // Thorn damage check
+    if (this._thorns && this.shadow) {
+      this._thorns.forEach(t => {
+        if (this.shadow.x > t.x && this.shadow.x < t.x + t.w && this.shadow.y > t.y - 10 && !this._thornCooldown) {
+          this._thornCooldown = true;
+          this.cameras.main.shake(200, 0.008);
+          this.shadow.setTint(0xff4444);
+          this.time.delayedCall(500, () => { this.shadow.clearTint(); this._thornCooldown = false; });
+        }
+      });
+    }
+    // Rock pushing
+    if (this._rocks) {
+      Object.values(this._rocks).forEach(rock => {
+        if (!rock.getData('pushed')) {
+          const dist = Phaser.Math.Distance.Between(this.shadow.x, this.shadow.y, rock.x, rock.y);
+          if (dist < 42) this._pushRock(rock);
+        }
+      });
+    }
+  }
+}
+
+// ============================================================
+// LEVEL 3 — The Snake Returns
+// ============================================================
+class Level3Scene extends BaseLevelScene {
+  constructor() { super('Level3'); }
+
+  create() {
+    const config = {
+      worldWidth: 2600,
+      startX: 80, startY: 350,
+      chapterName: 'Chapter 3 — The Snake Returns',
+      objective: 'Protect Gemma! Defeat the snake!\nBark 3 times to scare it away!',
+      platforms: [
+        { x: 200, y: 360 }, { x: 380, y: 320 },
+        { x: 560, y: 360, key: 'log' },
+        { x: 740, y: 300 }, { x: 920, y: 340 },
+        { x: 1100, y: 280, key: 'log' }, { x: 1280, y: 350 },
+        { x: 1460, y: 300 }, { x: 1640, y: 360, key: 'log' },
+        { x: 1820, y: 300 }, { x: 2000, y: 340 },
+        { x: 2200, y: 280, key: 'log' }, { x: 2400, y: 350 },
+      ],
+      rocks: [
+        { x: 480, y: 395 }, { x: 1000, y: 395 }, { x: 1600, y: 395 }, { x: 2100, y: 395 }
+      ],
+      gaps: [
+        { x: 300, w: 60 }, { x: 660, w: 60 }, { x: 1180, w: 60 }, { x: 1740, w: 60 }, { x: 2300, w: 60 }
+      ]
+    };
+
+    this.initLevel(config);
+
+    // Cage + Gemma at far end
+    this.cage = this.physics.add.staticImage(2520, 355, 'cage').setScale(2.2).setDepth(8);
+    this.gemmaGoal = this.add.image(2520, 342, 'gemma').setScale(1.6).setDepth(9);
+    this.tweens.add({ targets: this.gemmaGoal, y: '+=5', duration: 600, yoyo: true, repeat: -1 });
+
+    // THE SNAKE — chasing the player
+    this.snake = this.physics.add.sprite(2300, 372, 'snake').setScale(2).setDepth(9);
+    this.snake.setImmovable(false);
+    this.snake.body.setAllowGravity(false);
+    this._snakeHP = 3;
+    this._snakeAngry = false;
+    this._lastSnakeX = 2300;
+
+    // Snake health display
+    this._snakeHPText = this.add.text(W / 2, H - 32, '🐍 Snake HP: ❤️❤️❤️', {
+      fontSize: '13px', fontFamily: 'Georgia, serif', color: '#ee4422', stroke: '#0a0502', strokeThickness: 2
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(35);
+
+    // Bark counter
+    this._barkCount = 0;
+    this._barkTxt = this.add.text(W - 20, 38, '🐕 Barks: 0/3', {
+      fontSize: '14px', fontFamily: 'Georgia, serif', color: '#f5e0b0', stroke: '#1a0802', strokeThickness: 2
+    }).setOrigin(1, 0.5).setScrollFactor(0).setDepth(35);
+
+    // Collapsing platforms — visual warning
+    this._collapsing = [];
+    [560, 1100, 1640, 2200].forEach(px => {
+      const warn = this.add.rectangle(px, 300, 90, 5, 0xff4422, 0.4).setDepth(12);
+      this._collapsing.push({ x: px, warn, timer: 0, triggered: false });
+    });
+
+    // Override bark
+    this.onBark = () => {
+      if (this._snakeHP > 0) {
+        const dist = Phaser.Math.Distance.Between(this.shadow.x, this.shadow.y, this.snake.x, this.snake.y);
+        if (dist < 250) {
+          this._snakeHP--;
+          this._barkCount++;
+          this._barkTxt.setText(`🐕 Barks: ${this._barkCount}/3`);
+          this._updateSnakeHP();
+          this.snake.setTint(0xff6666);
+          this.tweens.add({ targets: this.snake, x: this.snake.x + 60, duration: 300, yoyo: true });
+          this.time.delayedCall(600, () => this.snake.clearTint());
+          this.cameras.main.shake(250, 0.01);
+          if (this._snakeHP <= 0) {
+            this._defeatSnake();
+          }
+        } else {
+          this._showMessage('Get closer to the snake and bark! 🐕');
+        }
+      }
+    };
+
+    // Tip
+    this.time.delayedCall(1000, () => this._showMessage('Reach the snake! Press B or 🐕 to bark!'));
+    this.time.delayedCall(3000, () => this._showMessage('Watch for collapsing platforms! ⚠️'));
+
+    // Tension: camera slight shake on snake approach
+    this.time.addEvent({ delay: 3000, callback: () => {
+      if (this._snakeHP > 0 && !this._levelDone) this.cameras.main.shake(100, 0.003);
+    }, loop: true });
+
+    this.physics.add.collider(this.snake, this.groundGroup);
+  }
+
+  _updateSnakeHP() {
+    const hearts = ['❤️', '❤️', '❤️'].map((h, i) => i < this._snakeHP ? h : '🖤').join('');
+    this._snakeHPText.setText(`🐍 Snake HP: ${hearts}`);
+  }
+
+  _defeatSnake() {
+    // Snake flees!
+    this._snakeHPText.setText('🐍 The snake flees!');
+    this.tweens.add({ targets: this.snake, x: this.snake.x + 400, alpha: 0, duration: 1200, ease: 'Power2' });
+    this.cameras.main.shake(400, 0.015);
+
+    // Sparkle burst
+    for (let i = 0; i < 16; i++) {
+      const sp = this.add.image(this.snake.x + (Math.random() - 0.5) * 100, this.snake.y + (Math.random() - 0.5) * 40, 'sparkle').setDepth(60);
+      this.tweens.add({ targets: sp, x: sp.x + (Math.random() - 0.5) * 150, y: sp.y - 60 - Math.random() * 60, alpha: 0, scale: 2, duration: 900, onComplete: () => sp.destroy() });
+    }
+
+    this.time.delayedCall(1500, () => {
+      if (!this._levelDone) {
+        this._levelDone = true;
+        // Hearts over Gemma
+        for (let i = 0; i < 8; i++) {
+          this.time.delayedCall(i * 180, () => {
+            const h = this.add.image(2520 + (Math.random() - 0.5) * 50, 320, 'heart').setDepth(60);
+            this.tweens.add({ targets: h, y: h.y - 60, alpha: 0, duration: 900, onComplete: () => h.destroy() });
+          });
+        }
+        this.time.delayedCall(1600, () => {
+          this._completeLevel('EndScene', 'GEMMA IS SAFE! 🐾💛\nShadow\'s love saved the day!');
+        });
+      }
+    });
+  }
+
+  update() {
+    this.updateMovement();
+
+    // Rock pushing
+    if (this._rocks) {
+      Object.values(this._rocks).forEach(rock => {
+        if (!rock.getData('pushed')) {
+          const dist = Phaser.Math.Distance.Between(this.shadow.x, this.shadow.y, rock.x, rock.y);
+          if (dist < 42) this._pushRock(rock);
+        }
+      });
+    }
+
+    // Snake follows player
+    if (this._snakeHP > 0 && !this._levelDone) {
+      const sx = this.snake.x, px = this.shadow.x;
+      const dist = Math.abs(sx - px);
+      if (dist < 600) {
+        const dir = px > sx ? 1 : -1;
+        this.snake.x += dir * 0.8;
+        this.snake.setFlipX(dir < 0);
+        // danger warning
+        if (dist < 120) {
+          this.cameras.main.shake(80, 0.004);
+          if (!this._snakeDangerShown) {
+            this._snakeDangerShown = true;
+            this._showMessage('⚠️ The snake is close! BARK! (B or 🐕)');
+          }
+        }
+      }
+    }
+
+    // Collapsing platforms
+    if (this._collapsing) {
+      this._collapsing.forEach(cp => {
+        const dist = Math.abs(this.shadow.x - cp.x);
+        if (dist < 60 && !cp.triggered) {
+          cp.triggered = true;
+          cp.warn.setFillStyle(0xff2200, 0.8);
+          this.time.delayedCall(800, () => {
+            // find & destroy platform near this x
+            this.platGroup.getChildren().forEach(p => {
+              if (Math.abs(p.x - cp.x) < 50) {
+                this.tweens.add({ targets: p, y: p.y + 80, alpha: 0, duration: 500, onComplete: () => { p.destroy(); cp.warn.destroy(); } });
+              }
+            });
+          });
+        }
+      });
+    }
+  }
+}
+
+// ============================================================
+// SCENE: END / CREDITS
+// ============================================================
+class EndScene extends Phaser.Scene {
+  constructor() { super('EndScene'); }
+
+  create() {
+    this.cameras.main.setBackgroundColor('#0d0806');
+    this.cameras.main.fadeIn(1000, 0, 0, 0);
+
+    // Warm background
+    this.add.image(400, 140, 'sky').setDisplaySize(800, 280).setAlpha(0.7);
+    this.add.image(400, 340, 'mountains').setDisplaySize(800, 200).setAlpha(0.5);
+    for (let i = 0; i < 8; i++) {
+      this.add.image(50 + i * 100, 330, 'tree').setAlpha(0.4).setScale(1.2 + Math.random() * 0.4);
+    }
+    for (let x = 0; x < 800; x += 32) this.add.image(x + 16, 434, 'ground').setDisplaySize(32, 32);
+
+    // Characters together
+    this.add.image(320, 360, 'shadow_idle').setScale(3).setDepth(5);
+    this.add.image(480, 365, 'gemma').setScale(2.8).setDepth(5);
+
+    // Hearts between them
+    this.time.addEvent({ delay: 600, callback: () => {
+      const h = this.add.image(400, 330 + Math.random() * 20, 'heart').setDepth(10).setScale(0.8 + Math.random() * 0.4);
+      this.tweens.add({ targets: h, y: h.y - 60, alpha: 0, duration: 1200, onComplete: () => h.destroy() });
+    }, loop: true });
+
+    // Cinematic bars
+    this.add.rectangle(400, 22, 800, 44, 0x000000, 0.8);
+    this.add.rectangle(400, 428, 800, 44, 0x000000, 0.8);
+
+    // Title cards
+    const lines = [
+      { t: 0, text: '"Gemma is safe."', size: '28px', color: '#f5c87a' },
+      { t: 2000, text: 'Shadow never left her side.', size: '18px', color: '#e8d0a8' },
+      { t: 4000, text: 'A bond of love.\nA life saved.', size: '22px', color: '#f5c87a' },
+      { t: 6500, text: '🐾  Thank you for playing  🐾', size: '20px', color: '#c9956b' },
+      { t: 8500, text: "Gemma's Story", size: '36px', color: '#f5c87a' },
+    ];
+
+    lines.forEach(l => {
+      this.time.delayedCall(l.t, () => {
+        const txt = this.add.text(400, 60, l.text, {
+          fontSize: l.size, fontFamily: 'Georgia, serif',
+          color: l.color, stroke: '#0a0502', strokeThickness: 3,
+          align: 'center', lineSpacing: 8
+        }).setOrigin(0.5).setAlpha(0);
+        this.tweens.add({ targets: txt, alpha: 1, duration: 800 });
+        this.tweens.add({ targets: txt, alpha: 0, delay: 1800, duration: 600, onComplete: () => txt.destroy() });
+      });
+    });
+
+    // Play Again button
+    this.time.delayedCall(10500, () => {
+      this.cameras.main.fadeIn(400);
+      const btn = this.add.image(400, 380, 'button_bg').setInteractive({ useHandCursor: true });
+      const txt = this.add.text(400, 380, '🐾 Play Again', {
+        fontSize: '18px', fontFamily: 'Georgia, serif', color: '#f5e0b0', stroke: '#1a0802', strokeThickness: 2
+      }).setOrigin(0.5);
+      this.tweens.add({ targets: [btn, txt], alpha: { from: 0, to: 1 }, duration: 600 });
+      btn.on('pointerup', () => {
+        this.cameras.main.fadeOut(500, 0, 0, 0);
+        this.time.delayedCall(550, () => this.scene.start('Menu'));
+      });
+      btn.on('pointerover', () => { btn.setScale(1.05); txt.setScale(1.05); });
+      btn.on('pointerout', () => { btn.setScale(1); txt.setScale(1); });
+    });
+
+    // Leaf rain
+    this.time.addEvent({ delay: 400, callback: () => {
+      const leaf = this.add.image(Math.random() * 800, -10, 'leaf').setAlpha(0.6).setDepth(15);
+      this.tweens.add({
+        targets: leaf, y: 460, x: `+=${(Math.random()-0.5)*80}`,
+        rotation: `+=${Math.PI * 3}`, alpha: 0,
+        duration: 3500 + Math.random() * 2000,
+        onComplete: () => leaf.destroy()
+      });
+    }, loop: true });
+  }
+}
+
+// ============================================================
+// PHASER CONFIG
+// ============================================================
+const config = {
+  type: Phaser.AUTO,
+  width: W,
+  height: H,
+  parent: 'game-container',
+  backgroundColor: '#0d0806',
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
+  physics: {
+    default: 'arcade',
+    arcade: {
+      gravity: { y: 500 },
+      debug: false
+    }
+  },
+  scene: [BootScene, MenuScene, Cinematic1Scene, Level1Scene, Level2Scene, Level3Scene, EndScene]
+};
+
+window._game = new Phaser.Game(config);
+</script>
+</body>
+</html>

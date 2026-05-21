@@ -1,0 +1,53 @@
+
+{
+  "placeholderImages": [
+    {
+      "id": "team-photo",
+      "description": "Mawby Technologies Team",
+      "imageUrl": "https://picsum.photos/seed/mawby1/600/400",
+      "imageHint": "team office"
+    },
+    {
+      "id": "user-avatar-1",
+      "description": "Arham Nawaz Avatar",
+      "imageUrl": "https://picsum.photos/seed/u1/150/150",
+      "imageHint": "man portrait"
+    },
+    {
+      "id": "user-avatar-2",
+      "description": "Sara Malik Avatar",
+      "imageUrl": "https://picsum.photos/seed/u2/150/150",
+      "imageHint": "woman portrait"
+    },
+    {
+      "id": "user-avatar-3",
+      "description": "Bilal Ahmed Avatar",
+      "imageUrl": "https://picsum.photos/seed/u3/150/150",
+      "imageHint": "man portrait"
+    },
+    {
+      "id": "user-avatar-4",
+      "description": "Zara Khan Avatar",
+      "imageUrl": "https://picsum.photos/seed/u4/150/150",
+      "imageHint": "woman portrait"
+    },
+    {
+      "id": "user-avatar-5",
+      "description": "Hamza Raza Avatar",
+      "imageUrl": "https://picsum.photos/seed/u5/150/150",
+      "imageHint": "man portrait"
+    },
+    {
+      "id": "user-avatar-6",
+      "description": "Nadia Farooq Avatar",
+      "imageUrl": "https://picsum.photos/seed/u6/150/150",
+      "imageHint": "woman portrait"
+    },
+    {
+      "id": "app-logo",
+      "description": "Mawby Technologies Logo (Orange MWY on Black)",
+      "imageUrl": "/logo.svg",
+      "imageHint": "orange MWY monogram"
+    }
+  ]
+}
