@@ -157,135 +157,154 @@ async function columnExists(table, column) {
   return rows[0]?.count > 0;
 }
 
+async function indexExists(table, indexName) {
+  const [rows] = await pool.query(
+    `SHOW INDEX FROM \`${table}\` WHERE Key_name = ?`,
+    [indexName]
+  );
+
+  return rows.length > 0;
+}
+
 async function addColumnIfMissing(table, column, definition) {
   if (!(await columnExists(table, column))) {
     await pool.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`);
   }
 }
 
-(async () => {
-  const migrations = [
-    async () => addColumnIfMissing('messages', 'files', 'TEXT NULL'),
-    async () => addColumnIfMissing('messages', 'links', 'TEXT NULL'),
-    async () => addColumnIfMissing('messages', 'is_pinned', 'TINYINT(1) DEFAULT 0'),
-    async () => addColumnIfMissing('messages', 'is_deleted', 'TINYINT(1) DEFAULT 0'),
-    async () => addColumnIfMissing('messages', 'deleted_by', 'INT NULL'),
-    async () => addColumnIfMissing('messages', 'deleted_at', 'DATETIME NULL'),
-    async () => addColumnIfMissing('group_members', 'left_at', 'DATETIME NULL DEFAULT NULL'),
-    // Create message_reads table for tracking read receipts
-    async () => pool.query(`CREATE TABLE IF NOT EXISTS message_reads (
-      id INT NOT NULL AUTO_INCREMENT,
-      message_id INT NOT NULL,
-      user_id INT NOT NULL,
-      read_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (id),
-      UNIQUE KEY message_reads_message_id_user_id_key (message_id, user_id),
-      FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      INDEX idx_user_id (user_id),
-      INDEX idx_read_at (read_at)
-    )`),
-    // Create message_deliveries table for tracking delivery receipts
-    async () => pool.query(`CREATE TABLE IF NOT EXISTS message_deliveries (
-      id INT NOT NULL AUTO_INCREMENT,
-      message_id INT NOT NULL,
-      user_id INT NOT NULL,
-      delivered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (id),
-      UNIQUE KEY message_deliveries_message_id_user_id_key (message_id, user_id),
-      FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      INDEX idx_deliveries_message (message_id),
-      INDEX idx_deliveries_user (user_id),
-      INDEX idx_delivered_at (delivered_at)
-    )`),
-    async () => addColumnIfMissing('messages', 'last_read_at', 'DATETIME NULL'),
-    // Create conversation_last_seen table for tracking when users last viewed conversations
-    async () => pool.query(`CREATE TABLE IF NOT EXISTS conversation_last_seen (
-      user_id INT NOT NULL,
-      conversation_id VARCHAR(100) NOT NULL,
-      last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      last_message_id INT,
-      PRIMARY KEY (user_id, conversation_id),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      INDEX idx_conversation_id (conversation_id),
-      INDEX idx_last_seen_at (last_seen_at)
-    )`),
-    // Create token_blacklist table for JWT revocation
-    async () => pool.query(`CREATE TABLE IF NOT EXISTS token_blacklist (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      token_hash VARCHAR(64) NOT NULL UNIQUE,
-      user_id INT NOT NULL,
-      blacklist_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      expires_at TIMESTAMP NOT NULL,
-      INDEX idx_token_hash (token_hash),
-      INDEX idx_expires_at (expires_at)
-    )`),
-    // Create user_sessions table for session management
-    async () => pool.query(`CREATE TABLE IF NOT EXISTS user_sessions (
-      id VARCHAR(36) PRIMARY KEY,
-      user_id INT NOT NULL,
-      token_hash VARCHAR(64) NOT NULL UNIQUE,
-      device_info VARCHAR(255),
-      ip_address VARCHAR(45),
-      user_agent TEXT,
-      login_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      expires_at TIMESTAMP NOT NULL,
-      logged_out_at TIMESTAMP NULL DEFAULT NULL,
-      is_active TINYINT(1) DEFAULT 1,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      INDEX idx_user_id (user_id),
-      INDEX idx_token_hash (token_hash),
-      INDEX idx_is_active (is_active),
-      INDEX idx_expires_at (expires_at)
-    )`),
-    // Create file_metadata table for persistent file tracking
-    async () => pool.query(`CREATE TABLE IF NOT EXISTS file_metadata (
-      id VARCHAR(36) PRIMARY KEY,
-      r2_key VARCHAR(500) NOT NULL UNIQUE,
-      conversation_id VARCHAR(100) NOT NULL,
-      user_id INT NOT NULL,
-      original_name VARCHAR(255) NOT NULL,
-      file_type VARCHAR(50) DEFAULT 'other',
-      mime_type VARCHAR(100) DEFAULT '',
-      file_size BIGINT DEFAULT 0,
-      uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      origin_message_id INT NULL DEFAULT NULL,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      INDEX idx_fm_conversation_id (conversation_id),
-      INDEX idx_fm_user_id (user_id),
-      INDEX idx_fm_uploaded_at (uploaded_at)
-    )`),
-    // Add performance indexes
-    async () => pool.query('ALTER TABLE users ADD INDEX idx_email (email)'),
-    async () => pool.query('ALTER TABLE users ADD INDEX idx_status (status)'),
-    async () => pool.query('ALTER TABLE messages ADD INDEX idx_sender_conversation (sender_id, conversation_id)'),
-    async () => pool.query('ALTER TABLE messages ADD INDEX idx_conversation_created (conversation_id, created_at DESC)'),
-    async () => pool.query('ALTER TABLE messages ADD INDEX idx_is_deleted (is_deleted)'),
-    async () => pool.query('ALTER TABLE message_reactions ADD INDEX idx_message_user (message_id, user_id)'),
-    async () => pool.query('ALTER TABLE group_members ADD INDEX idx_group_user (group_id, user_id)'),
-    async () => pool.query('ALTER TABLE notification_reads ADD INDEX idx_notification (notification_id)'),
-  ];
+async function addIndexIfMissing(table, indexName, definition) {
+  if (!(await indexExists(table, indexName))) {
+    await pool.query(`ALTER TABLE \`${table}\` ADD INDEX \`${indexName}\` ${definition}`);
+  }
+}
 
-  for (const migrate of migrations) {
-    try {
-      await migrate();
-    } catch (err) {
-      if (
-        err.code !== 'ER_DUP_FIELDNAME' &&
-        err.code !== 'ER_TABLE_EXISTS_ERROR' &&
-        err.code !== 'ER_DUP_KEY_NAME' &&
-        err.code !== 'ER_DUP_INDEX' &&
-        err.code !== 'ER_DUP_KEY' &&
-        err.code !== 'ER_DUP_ENTRY'
-      ) {
-        console.error('[migration]', err.message);
+(async () => {
+  try {
+    const migrations = [
+      async () => addColumnIfMissing('messages', 'files', 'TEXT NULL'),
+      async () => addColumnIfMissing('messages', 'links', 'TEXT NULL'),
+      async () => addColumnIfMissing('messages', 'is_pinned', 'TINYINT(1) DEFAULT 0'),
+      async () => addColumnIfMissing('messages', 'is_deleted', 'TINYINT(1) DEFAULT 0'),
+      async () => addColumnIfMissing('messages', 'deleted_by', 'INT NULL'),
+      async () => addColumnIfMissing('messages', 'deleted_at', 'DATETIME NULL'),
+      async () => addColumnIfMissing('group_members', 'left_at', 'DATETIME NULL DEFAULT NULL'),
+      // Create message_reads table for tracking read receipts
+      async () => pool.query(`CREATE TABLE IF NOT EXISTS message_reads (
+        id INT NOT NULL AUTO_INCREMENT,
+        message_id INT NOT NULL,
+        user_id INT NOT NULL,
+        read_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY message_reads_message_id_user_id_key (message_id, user_id),
+        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_user_id (user_id),
+        INDEX idx_read_at (read_at)
+      )`),
+      // Create message_deliveries table for tracking delivery receipts
+      async () => pool.query(`CREATE TABLE IF NOT EXISTS message_deliveries (
+        id INT NOT NULL AUTO_INCREMENT,
+        message_id INT NOT NULL,
+        user_id INT NOT NULL,
+        delivered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY message_deliveries_message_id_user_id_key (message_id, user_id),
+        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_deliveries_message (message_id),
+        INDEX idx_deliveries_user (user_id),
+        INDEX idx_delivered_at (delivered_at)
+      )`),
+      async () => addColumnIfMissing('messages', 'last_read_at', 'DATETIME NULL'),
+      // Create conversation_last_seen table for tracking when users last viewed conversations
+      async () => pool.query(`CREATE TABLE IF NOT EXISTS conversation_last_seen (
+        user_id INT NOT NULL,
+        conversation_id VARCHAR(100) NOT NULL,
+        last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        last_message_id INT,
+        PRIMARY KEY (user_id, conversation_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_conversation_id (conversation_id),
+        INDEX idx_last_seen_at (last_seen_at)
+      )`),
+      // Create token_blacklist table for JWT revocation
+      async () => pool.query(`CREATE TABLE IF NOT EXISTS token_blacklist (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        token_hash VARCHAR(64) NOT NULL UNIQUE,
+        user_id INT NOT NULL,
+        blacklist_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP NOT NULL,
+        INDEX idx_token_hash (token_hash),
+        INDEX idx_expires_at (expires_at)
+      )`),
+      // Create user_sessions table for session management
+      async () => pool.query(`CREATE TABLE IF NOT EXISTS user_sessions (
+        id VARCHAR(36) PRIMARY KEY,
+        user_id INT NOT NULL,
+        token_hash VARCHAR(64) NOT NULL UNIQUE,
+        device_info VARCHAR(255),
+        ip_address VARCHAR(45),
+        user_agent TEXT,
+        login_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP NOT NULL,
+        logged_out_at TIMESTAMP NULL DEFAULT NULL,
+        is_active TINYINT(1) DEFAULT 1,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_user_id (user_id),
+        INDEX idx_token_hash (token_hash),
+        INDEX idx_is_active (is_active),
+        INDEX idx_expires_at (expires_at)
+      )`),
+      // Create file_metadata table for persistent file tracking
+      async () => pool.query(`CREATE TABLE IF NOT EXISTS file_metadata (
+        id VARCHAR(36) PRIMARY KEY,
+        r2_key VARCHAR(500) NOT NULL UNIQUE,
+        conversation_id VARCHAR(100) NOT NULL,
+        user_id INT NOT NULL,
+        original_name VARCHAR(255) NOT NULL,
+        file_type VARCHAR(50) DEFAULT 'other',
+        mime_type VARCHAR(100) DEFAULT '',
+        file_size BIGINT DEFAULT 0,
+        uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        origin_message_id INT NULL DEFAULT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_fm_conversation_id (conversation_id),
+        INDEX idx_fm_user_id (user_id),
+        INDEX idx_fm_uploaded_at (uploaded_at)
+      )`),
+      // Add performance indexes
+      async () => addIndexIfMissing('users', 'idx_email', '(email)'),
+      async () => addIndexIfMissing('users', 'idx_status', '(status)'),
+      async () => addIndexIfMissing('messages', 'idx_sender_conversation', '(sender_id, conversation_id)'),
+      async () => addIndexIfMissing('messages', 'idx_conversation_created', '(conversation_id, created_at DESC)'),
+      async () => addIndexIfMissing('messages', 'idx_is_deleted', '(is_deleted)'),
+      async () => addIndexIfMissing('message_reactions', 'idx_message_user', '(message_id, user_id)'),
+      async () => addIndexIfMissing('group_members', 'idx_group_user', '(group_id, user_id)'),
+      async () => addIndexIfMissing('notification_reads', 'idx_notification', '(notification_id)'),
+    ];
+
+    for (const migrate of migrations) {
+      try {
+        await migrate();
+      } catch (err) {
+        if (
+          err.code !== 'ER_DUP_FIELDNAME' &&
+          err.code !== 'ER_TABLE_EXISTS_ERROR' &&
+          err.code !== 'ER_DUP_KEY_NAME' &&
+          err.code !== 'ER_DUP_INDEX' &&
+          err.code !== 'ER_DUP_KEY' &&
+          err.code !== 'ER_DUP_ENTRY'
+        ) {
+          console.error('[migration]', err.message);
+        }
       }
     }
-  }
 
-  console.log('✅ Database migrations completed');
+    console.log('✅ Database migrations completed');
+  } catch (err) {
+    console.error('[migration] unexpected error:', err);
+  }
 })();
 
 // Wire Socket.IO handlers with optimization service

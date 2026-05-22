@@ -324,11 +324,14 @@ function setupSocket(io, optimizationService) {
           console.error('[send_message] notification error:', noteErr);
         }
 
-        // For DMs, also notify the other user via their personal room in case they haven't opened the chat yet.
+        // For DMs, only send a personal-room fallback when the recipient is not currently in the DM room.
         if (conversationId.startsWith('dm_')) {
           const parts = conversationId.split('_');
           const otherId = String(parts[1]) === String(userId) ? parts[2] : parts[1];
-          if (String(otherId) !== String(userId)) {
+          const dmRoom = io.sockets.adapter.rooms.get(conversationId);
+          const hasOtherParticipant = dmRoom && Array.from(dmRoom).some((socketId) => socketId !== socket.id);
+
+          if (!hasOtherParticipant && String(otherId) !== String(userId)) {
             socket.to(`user_${otherId}`).emit('new_message', { conversationId, message });
           }
         }
