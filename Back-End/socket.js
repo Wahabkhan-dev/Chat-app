@@ -262,7 +262,7 @@ function setupSocket(io, optimizationService) {
 
         // Persist a message notification for recipients so it survives refresh/relogin.
         try {
-          const [senderRows] = await pool.query('SELECT name FROM users WHERE id = ?', [userId]);
+          const [senderRows] = await pool.query('SELECT name FROM users WHERE id = ? AND is_active = 1', [userId]);
           const senderName = senderRows[0]?.name || 'Someone';
           const preview = (message.content || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1').slice(0, 80) || '📎 Attachment';
           let notificationTitle = senderName;
@@ -460,7 +460,7 @@ socket.on('typing', async ({ conversationId }) => {
       try {
         // If user was in 'away' or 'dnd' status, reset to online
         const [[{ currentStatus }]] = await pool.query(
-          'SELECT status as currentStatus FROM users WHERE id = ?',
+          'SELECT status as currentStatus FROM users WHERE id = ? AND is_active = 1',
           [userId]
         );
 
@@ -659,7 +659,7 @@ socket.on('typing', async ({ conversationId }) => {
               }
             }
 
-            const [[reactorRow]] = await pool.query('SELECT name FROM users WHERE id = ?', [userId]);
+            const [[reactorRow]] = await pool.query('SELECT name FROM users WHERE id = ? AND is_active = 1', [userId]);
             const reactorName = reactorRow?.name || 'Someone';
             const preview = (msgRow.content || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1').slice(0, 40);
             const title = `${reactorName} reacted ${emoji}`;

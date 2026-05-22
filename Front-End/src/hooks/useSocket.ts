@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useAppContext } from '@/context/AppContext';
 import { connectSocket, disconnectSocket, getSocket } from '@/services/socket';
+import { forceLogout } from '@/services/auth';
 import { api } from '@/lib/api';
 import { toast } from '@/hooks/use-toast';
 import { playNotificationSound } from '@/lib/notificationSound';
@@ -295,6 +296,30 @@ export function useSocket() {
       if (!user) return;
       const normalized = { ...user, id: String(user.id), isActive: user.is_active === 1 || user.is_active === true };
       dispatch({ type: 'UPDATE_USER', payload: normalized });
+    });
+
+    // Force logout (server-side deactivation) — clear local session and redirect
+    socket.on('force_logout', async ({ reason }) => {
+      try {
+        await forceLogout();
+      } catch {}
+      dispatch({ type: 'LOGOUT' });
+      try { disconnectSocket(); } catch {}
+      try {
+        toast({ title: 'Logged out', description: reason === 'account_deactivated' ? 'Your account was deactivated.' : 'You have been logged out.', type: 'info' });
+        window.location.href = '/';
+      } catch {}
+    });
+
+    // Notify clients when a user is reactivated — refresh user list and update state
+    socket.on('user_reactivated', async ({ userId }) => {
+      try {
+        dispatch({ type: 'REACTIVATE_USER', payload: String(userId) });
+        const res = await api.get('/users/directory');
+        if (res && Array.isArray(res.users)) dispatch({ type: 'SET_USERS', payload: res.users.map((u: any) => ({ ...u, id: String(u.id), isActive: u.is_active === 1 })) });
+      } catch (e) {
+        console.warn('user_reactivated handler failed', e);
+      }
     });
 
     const processedUndeletes = new Set<string>();

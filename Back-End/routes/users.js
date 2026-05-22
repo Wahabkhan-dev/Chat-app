@@ -11,6 +11,7 @@ const { PutObjectCommand } = require('@aws-sdk/client-s3');
 const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 3 * 1024 * 1024 } });
 
 const router = express.Router();
+const sessionService = require('../services/sessionService');
 
 // GET /api/users/directory — all active users for any logged-in user (for DM list)
 router.get('/directory', authenticateToken, async (req, res) => {
@@ -157,6 +158,25 @@ router.put('/:id/deactivate', authenticateToken, requireAdmin, async (req, res) 
   const { id } = req.params;
   try {
     await pool.query('UPDATE users SET is_active = 0 WHERE id = ?', [id]);
+
+    // Invalidate all server-side sessions for this user so tokens/sessions are revoked
+    try {
+      await sessionService.invalidateAllUserSessions(id);
+    } catch (e) {
+      console.warn('[users] failed to invalidate sessions for user', id, e.message || e);
+    }
+
+    // Notify the user's personal socket room to force immediate logout
+    const [rows] = await pool.query(
+      'SELECT id, name, email, role, avatar, status, department, is_active, created_at FROM users WHERE id = ?',
+      [id]
+    );
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${id}`).emit('force_logout', { reason: 'account_deactivated' });
+      if (rows && rows[0]) io.emit('user_updated', { user: rows[0] });
+    }
+
     res.json({ message: 'User deactivated.' });
   } catch (err) {
     console.error(err);
@@ -169,6 +189,18 @@ router.put('/:id/reactivate', authenticateToken, requireAdmin, async (req, res) 
   const { id } = req.params;
   try {
     await pool.query('UPDATE users SET is_active = 1 WHERE id = ?', [id]);
+
+    const [rows] = await pool.query(
+      'SELECT id, name, email, role, avatar, status, department, is_active, created_at FROM users WHERE id = ?',
+      [id]
+    );
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('user_reactivated', { userId: id });
+      if (rows && rows[0]) io.emit('user_updated', { user: rows[0] });
+    }
+
     res.json({ message: 'User reactivated.' });
   } catch (err) {
     console.error(err);
@@ -191,7 +223,7 @@ router.patch('/me/avatar', authenticateToken, avatarUpload.single('avatar'), asy
     }));
     await pool.query('UPDATE users SET avatar = ? WHERE id = ?', [key, userId]);
     const [rows] = await pool.query(
-      'SELECT id, name, email, role, avatar, status, department, is_active, created_at FROM users WHERE id = ?',
+      'SELECT id, name, email, role, avatar, status, department, is_active, created_at FROM users WHERE id = ? AND is_active = 1',
       [userId]
     );
     const io = req.app.get('io');
