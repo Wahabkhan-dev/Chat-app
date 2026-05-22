@@ -45,25 +45,41 @@ const defaultAllowedOrigins = [
   'http://192.168.91.173:9002',
   'http://localhost:3000',
   'http://localhost:3001',
+  'https://chat-app-three-beta-14.vercel.app',
 ];
+
+const frontendUrl = process.env.FRONTEND_URL?.trim();
 
 // Support environment variable origins
 const envOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map((url) => url.trim()).filter(Boolean)
   : [];
 
-const ALLOWED_ORIGINS = [...new Set([...defaultAllowedOrigins, ...envOrigins])];
+const ALLOWED_ORIGINS = [...new Set([
+  ...defaultAllowedOrigins,
+  ...envOrigins,
+  ...(frontendUrl ? [frontendUrl] : []),
+])];
 
-// Also allow requests from any IP on same port for development
-if (process.env.NODE_ENV !== 'production') {
-  // In development, be more permissive
-}
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS origin denied: ${origin}`));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
 
+console.log('[CORS] Frontend URL:', frontendUrl || 'not set');
 console.log('[CORS] Allowed origins:', ALLOWED_ORIGINS);
 
 // Socket.IO with enhanced configuration
 const io = new Server(server, {
-  cors: { origin: ALLOWED_ORIGINS, credentials: true },
+  cors: corsOptions,
   pingInterval: 25000,
   pingTimeout: 60000,
   maxHttpBufferSize: 1e6, // 1MB
@@ -76,7 +92,8 @@ app.set('optimizationService', optimizationService);
 app.set('attachmentService', attachmentService);
 
 // Middleware
-app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
