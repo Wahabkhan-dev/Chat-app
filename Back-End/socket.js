@@ -199,7 +199,13 @@ function setupSocket(io, optimizationService) {
         );
         if (blockedRows.length > 0) {
           return callback?.({ success: false, error: 'This user has blocked you. Your message was not delivered.' });
-        }      } else {
+        }
+        // Prevent messaging deactivated users
+        const [activeRows] = await pool.query('SELECT is_active FROM users WHERE id = ?', [otherId]);
+        if (activeRows.length > 0 && activeRows[0].is_active === 0) {
+          return callback?.({ success: false, error: 'This user is deactivated and cannot receive messages.' });
+        }
+      } else {
         // Ensure sender is an active group member
         const [membershipRows] = await pool.query('SELECT id FROM group_members WHERE group_id = ? AND user_id = ? AND left_at IS NULL', [conversationId, userId]);
         if (!membershipRows.length) {

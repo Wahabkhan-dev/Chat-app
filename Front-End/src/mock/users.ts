@@ -12,6 +12,7 @@ export interface User {
   status: UserStatus;
   department: string;
   createdAt: string;
+  isActive?: boolean;
 }
 
 export const mockUsers: User[] = [

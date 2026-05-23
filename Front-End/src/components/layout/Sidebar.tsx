@@ -251,10 +251,6 @@ const Sidebar: React.FC<{ onViewChange: (view: AppView) => void; onCreateGroup: 
       .filter(u => {
         if (u.id === state.currentUser?.id) return false;
         if (!u.name.toLowerCase().includes(sidebarSearch.toLowerCase())) return false;
-        if (u.isActive === false) {
-          const convId = getDmConvId(state.currentUser?.id, u.id);
-          return !!(state.conversationMeta[convId]?.lastMessage);
-        }
         return true;
       })
       .sort((a, b) => {

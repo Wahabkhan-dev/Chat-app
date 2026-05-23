@@ -13,11 +13,11 @@ const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSiz
 const router = express.Router();
 const sessionService = require('../services/sessionService');
 
-// GET /api/users/directory — all active users for any logged-in user (for DM list)
+// GET /api/users/directory — all users (active + inactive) for directory and DM list
 router.get('/directory', authenticateToken, async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT id, name, email, role, avatar, status, department, is_active, created_at FROM users WHERE is_active = 1 ORDER BY name ASC'
+      'SELECT id, name, email, role, avatar, status, department, is_active, created_at FROM users ORDER BY name ASC'
     );
     res.json({ users: rows });
   } catch (err) {

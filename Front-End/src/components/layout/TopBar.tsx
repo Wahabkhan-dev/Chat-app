@@ -165,10 +165,31 @@ const TopBar: React.FC<{ onCreateUser: () => void }> = ({ onCreateUser }) => {
                     <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3 px-2">People</h4>
                     <div className="space-y-1">
                       {searchResults.people.map(u => (
-                        <div key={u.id} className="flex items-center gap-3 p-2.5 hover:bg-muted rounded-xl cursor-pointer transition-all" onClick={() => handleSelectResult('dm', u)}>
-                          <Avatar name={u.name} src={u.avatar} size="sm" status={u.status} showStatus />
+                        <div
+                          key={u.id}
+                          className={cn(
+                            "flex items-center gap-3 p-2.5 rounded-xl transition-all",
+                            u.isActive === false
+                              ? "opacity-60 cursor-default"
+                              : "hover:bg-muted cursor-pointer"
+                          )}
+                          onClick={() => u.isActive !== false && handleSelectResult('dm', u)}
+                        >
+                          <Avatar
+                            name={u.name}
+                            src={u.avatar}
+                            size="sm"
+                            status={u.isActive === false ? undefined : u.status}
+                            showStatus={u.isActive !== false}
+                            className={u.isActive === false ? 'grayscale' : ''}
+                          />
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-bold text-foreground truncate">{u.name}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-bold text-foreground truncate">{u.name}</p>
+                              {u.isActive === false && (
+                                <span className="shrink-0 text-[9px] font-bold text-muted-foreground uppercase bg-muted px-1.5 py-0.5 rounded">Inactive</span>
+                              )}
+                            </div>
                             <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-tighter">{u.department}</p>
                           </div>
                         </div>

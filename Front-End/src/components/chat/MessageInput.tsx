@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useAppContext } from '@/context/AppContext';
-import { Paperclip, Send, Smile, X, CornerDownRight, AtSign, Lock, ShieldAlert, Plus, Search, FileText, File as FileIcon, Play, Video, LogOut } from 'lucide-react';
+import { Paperclip, Send, Smile, X, CornerDownRight, AtSign, Lock, ShieldAlert, Plus, Search, FileText, File as FileIcon, Play, Video, LogOut, UserX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Message, MessageFile } from '@/mock/messages';
@@ -41,6 +41,12 @@ const MessageInput: React.FC = () => {
   const isReadOnly = group?.settings?.messagePermission === 'admin_only' && !canManageGroup(state.currentUser, group);
   const hasLeftGroup = !!(activeConversation?.type === 'group' && state.conversationMeta[activeConversation.id]?.leftAt);
   const isBlockedConversation = activeConversation?.type === 'dm' && state.conversationMeta[activeConversation.id]?.blocked;
+
+  const dmPartnerId = activeConversation?.type === 'dm'
+    ? activeConversation.id.split('_').slice(1).find(id => id !== String(state.currentUser?.id))
+    : null;
+  const dmPartner = dmPartnerId ? state.users.find(u => u.id === dmPartnerId) : null;
+  const isPartnerDeactivated = activeConversation?.type === 'dm' && dmPartner?.isActive === false;
 
   const uploadedFiles = state.chatUI.uploadedFiles;
 
@@ -245,6 +251,18 @@ const MessageInput: React.FC = () => {
       }
     });
   };
+
+  if (isPartnerDeactivated) {
+    return (
+      <div className="p-6 pt-0">
+        <div className="bg-muted/50 border-2 border-dashed border-border rounded-2xl p-4 flex flex-col items-center justify-center text-center gap-2 animate-in slide-in-from-bottom-2">
+          <UserX className="h-5 w-5 text-muted-foreground" />
+          <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">This user is deactivated</p>
+          <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-tighter opacity-60">Messages cannot be sent to deactivated accounts</p>
+        </div>
+      </div>
+    );
+  }
 
   if (hasLeftGroup) {
     return (
