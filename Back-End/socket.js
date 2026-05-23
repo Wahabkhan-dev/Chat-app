@@ -1,7 +1,6 @@
 const jwt = require('jsonwebtoken');
 const pool = require('./config/database');
 const { updateLastSeen } = require('./services/messageReadsService');
-const { createFileMetadata } = require('./services/fileMetadataService');
 const { checkSocketEventLimit } = require('./middleware/rateLimit');
 const crypto = require('crypto');
 require('dotenv').config();
@@ -246,15 +245,14 @@ function setupSocket(io, optimizationService) {
           status: 'sent',
         };
 
+        // Set origin_message_id on metadata records already written by /api/upload.
+        // Do NOT insert again — the upload route already saved them, avoiding duplicates in shared files.
         if (fileAttachments.length > 0) {
-          try {
-            await Promise.all(fileAttachments.map((file) => {
-              const fileSize = Number(file.size) || 0;
-              return createFileMetadata(file.key, conversationId, userId, file.name, file.type, file.mimeType, fileSize, result.insertId);
-            }));
-          } catch (metaErr) {
-            console.error('[send_message] file metadata save failed:', metaErr);
-          }
+          const keys = fileAttachments.map(f => f.key);
+          pool.query(
+            'UPDATE file_metadata SET origin_message_id = ? WHERE r2_key IN (?)',
+            [result.insertId, keys]
+          ).catch(err => console.error('[send_message] metadata update failed:', err.message));
         }
 
         // Broadcast to everyone in the room EXCEPT the sender

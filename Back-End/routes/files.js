@@ -50,7 +50,10 @@ async function checkAccess(key, userId, userRole, pool) {
   if (!conversationId) throw { status: 400, message: 'Cannot determine conversation from key.' };
   if (conversationId.startsWith('dm_')) {
     const dmParts = conversationId.split('_');
-    if (String(userId) !== dmParts[1] && String(userId) !== dmParts[2]) throw { status: 403, message: 'Access denied.' };
+    if (String(userId) !== dmParts[1] && String(userId) !== dmParts[2]) {
+      if (userRole !== 'admin') throw { status: 403, message: 'Access denied.' };
+      // Admins can access DM files for moderation (consistent with group file access)
+    }
   } else if (userRole !== 'admin') {
     const [rows] = await pool.query('SELECT id FROM group_members WHERE group_id = ? AND user_id = ? AND left_at IS NULL', [conversationId, userId]);
     if (!rows.length) throw { status: 403, message: 'Access denied.' };

@@ -70,7 +70,7 @@ const corsOptions = {
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
@@ -288,14 +288,13 @@ async function addIndexIfMissing(table, indexName, definition) {
       try {
         await migrate();
       } catch (err) {
-        if (
-          err.code !== 'ER_DUP_FIELDNAME' &&
-          err.code !== 'ER_TABLE_EXISTS_ERROR' &&
-          err.code !== 'ER_DUP_KEY_NAME' &&
-          err.code !== 'ER_DUP_INDEX' &&
-          err.code !== 'ER_DUP_KEY' &&
-          err.code !== 'ER_DUP_ENTRY'
-        ) {
+        // Silence expected idempotency errors — duplicate columns/indexes, missing tables on fresh DB
+        const SILENT = new Set([
+          'ER_DUP_FIELDNAME', 'ER_TABLE_EXISTS_ERROR', 'ER_DUP_KEY_NAME',
+          'ER_DUP_INDEX', 'ER_DUP_KEY', 'ER_DUP_ENTRY',
+          'ER_NO_SUCH_TABLE',  // table not yet created (e.g. notification_reads on fresh deploy)
+        ]);
+        if (!SILENT.has(err.code) && err.errno !== 1061 && err.errno !== 1060 && err.errno !== 1146) {
           console.error('[migration]', err.message);
         }
       }
@@ -339,18 +338,4 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ CORS enabled for: ${ALLOWED_ORIGINS.join(', ')}`);
   console.log(`✅ Optimization service initialized`);
   console.log(`✅ Socket.IO configured with health checks`);
-});
-
-
-// Cleanup expired sessions and blacklisted tokens every hour
-setInterval(async () => {
-  try {
-    await cleanupExpiredData();
-  } catch (err) {
-    console.error('Error during scheduled cleanup:', err.message);
-  }
-}, 60 * 60 * 1000); // 1 hour
-
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ Server running on http://0.0.0.0:${PORT}`);
 });

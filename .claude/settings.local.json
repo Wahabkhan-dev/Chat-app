@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --check server.js)",
+      "Bash(node --check socket.js)",
+      "Bash(node --check routes/upload.js)",
+      "Bash(node --check middleware/validation.js)"
+    ]
+  }
+}

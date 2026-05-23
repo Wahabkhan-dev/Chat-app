@@ -19,7 +19,7 @@ router.post('/login', async (req, res) => {
 
   try {
     const [rows] = await pool.query(
-      'SELECT * FROM users WHERE email = ? AND is_active = 1',
+      'SELECT * FROM users WHERE email = ?',
       [email.toLowerCase().trim()]
     );
 
@@ -32,6 +32,11 @@ router.post('/login', async (req, res) => {
 
     if (!isPasswordValid) {
       return res.status(401).json({ message: 'Invalid email or password.' });
+    }
+
+    // Check after password so we don't leak whether the email exists
+    if (!user.is_active) {
+      return res.status(403).json({ message: 'Your account has been deactivated. Please contact an administrator to reactivate it.' });
     }
 
     const token = jwt.sign(
