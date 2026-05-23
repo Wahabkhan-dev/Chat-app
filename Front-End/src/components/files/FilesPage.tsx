@@ -154,10 +154,10 @@ const FilesPage: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 bg-background p-8 overflow-y-auto scrollbar-hide animate-in fade-in duration-500">
+    <div className="flex-1 bg-background p-4 md:p-8 overflow-y-auto scrollbar-hide animate-in fade-in duration-500">
       <div className="max-w-6xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold font-headline text-foreground tracking-tight">Shared Content Repository</h1>
+        <div className="mb-5 md:mb-8">
+          <h1 className="text-2xl md:text-3xl font-bold font-headline text-foreground tracking-tight">Shared Content Repository</h1>
           <p className="text-muted-foreground mt-1 text-sm font-medium">Browse and manage all documents, media, and links shared across your workspace.</p>
         </div>
 

@@ -97,9 +97,17 @@ const RightPanel: React.FC = () => {
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [panelWidth, setPanelWidth] = useState(320);
+  const [isMobile, setIsMobile] = useState(false);
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
   const dragStartWidth = useRef(320);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -959,12 +967,22 @@ const RightPanel: React.FC = () => {
   };
 
   return (
+    <>
+      {/* Mobile: full-screen backdrop */}
+      {panel.open && (
+        <div
+          className="fixed inset-0 bg-black/40 z-[var(--z-right-panel)] md:hidden"
+          onClick={handleClose}
+        />
+      )}
     <div
       className={cn(
-        "border-l bg-card text-card-foreground h-full flex flex-col shrink-0 fixed right-0 top-0 transition-transform duration-300 z-[var(--z-right-panel)] shadow-2xl",
+        "border-l bg-card text-card-foreground flex flex-col shrink-0 fixed right-0 transition-transform duration-300 z-[var(--z-right-panel)] shadow-2xl",
+        "top-0 h-[100dvh]",
+        "md:top-[56px] md:h-[calc(100vh-56px)]",
         panel.open ? "translate-x-0" : "translate-x-full shadow-none"
       )}
-      style={{ top: '56px', height: 'calc(100vh - 56px)', width: `${panelWidth}px` }}
+      style={{ width: isMobile ? '100%' : `${panelWidth}px` }}
     >
       {/* Drag-to-resize handle */}
       <div
@@ -1032,6 +1050,7 @@ const RightPanel: React.FC = () => {
         {renderTabContent()}
       </ScrollArea>
     </div>
+    </>
   );
 };
 

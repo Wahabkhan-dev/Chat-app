@@ -81,29 +81,30 @@ const SettingsPage: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 bg-background p-8 overflow-y-auto scrollbar-hide animate-in fade-in duration-500">
+    <div className="flex-1 bg-background p-4 md:p-8 overflow-y-auto scrollbar-hide animate-in fade-in duration-500">
       <div className="max-w-4xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold font-headline text-foreground tracking-tight">Workspace Settings</h1>
+        <div className="mb-6 md:mb-8">
+          <h1 className="text-2xl md:text-3xl font-bold font-headline text-foreground tracking-tight">Workspace Settings</h1>
           <p className="text-muted-foreground mt-1 text-sm font-medium">Manage your account preferences and workspace experience.</p>
         </div>
 
-        <Tabs defaultValue="profile" className="space-y-6">
-          <TabsList className="bg-card border p-1 rounded-xl h-auto">
-            <TabsTrigger value="profile" className="gap-2 px-6 py-2 rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white transition-all font-bold text-xs uppercase tracking-widest">
+        <Tabs defaultValue="profile" className="space-y-4 md:space-y-6">
+          <TabsList className="bg-card border p-1 rounded-xl h-auto w-full md:w-auto">
+            <TabsTrigger value="profile" className="flex-1 md:flex-none gap-2 px-4 md:px-6 py-2 rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white transition-all font-bold text-xs uppercase tracking-widest">
               <User className="h-4 w-4" />
               <span>Profile</span>
             </TabsTrigger>
-            <TabsTrigger value="appearance" className="gap-2 px-6 py-2 rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white transition-all font-bold text-xs uppercase tracking-widest">
+            <TabsTrigger value="appearance" className="flex-1 md:flex-none gap-2 px-4 md:px-6 py-2 rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white transition-all font-bold text-xs uppercase tracking-widest">
               <Palette className="h-4 w-4" />
               <span>Appearance</span>
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="profile" className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
-            <div className="bg-card rounded-2xl border border-border shadow-sm p-8">
-              <div className="flex items-center gap-8 mb-10">
-                <div className="relative group cursor-pointer" onClick={() => !isUploadingPhoto && fileInputRef.current?.click()} title="Change profile picture">
+            <div className="bg-card rounded-2xl border border-border shadow-sm p-4 md:p-8">
+              {/* Profile picture section — stacks on mobile */}
+              <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 sm:gap-8 mb-8">
+                <div className="relative group cursor-pointer shrink-0" onClick={() => !isUploadingPhoto && fileInputRef.current?.click()} title="Change profile picture">
                   <Avatar name={state.currentUser?.name || ''} src={state.currentUser?.avatar} size="xl" />
                   <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                     {isUploadingPhoto
@@ -113,30 +114,22 @@ const SettingsPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex-1">
+                <div className="flex-1 text-center sm:text-left">
                   <h3 className="text-xl font-bold font-headline">Profile Picture</h3>
-                  <p className="text-sm text-muted-foreground mb-6 font-medium leading-relaxed">
-                    Upload a clear photo to help your team members recognize you in conversations and meetings.
+                  <p className="text-sm text-muted-foreground mb-4 md:mb-6 font-medium leading-relaxed">
+                    Upload a clear photo to help your team members recognize you.
                   </p>
-                  <div className="flex gap-3">
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      className="hidden"
-                      accept="image/*"
-                      onChange={handlePhotoChange}
-                    />
-                    <Button variant="outline" size="sm" className="rounded-xl h-10 px-6 font-bold border-border hover:bg-primary/5 hover:text-primary transition-all gap-2" onClick={() => fileInputRef.current?.click()} disabled={isUploadingPhoto}>
-                      <Camera className="h-4 w-4" />
-                      {isUploadingPhoto ? 'Uploading...' : 'Change Photo'}
-                    </Button>
-                  </div>
+                  <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handlePhotoChange} />
+                  <Button variant="outline" size="sm" className="rounded-xl h-10 px-6 font-bold border-border hover:bg-primary/5 hover:text-primary transition-all gap-2 w-full sm:w-auto" onClick={() => fileInputRef.current?.click()} disabled={isUploadingPhoto}>
+                    <Camera className="h-4 w-4" />
+                    {isUploadingPhoto ? 'Uploading...' : 'Change Photo'}
+                  </Button>
                 </div>
               </div>
 
-              <Separator className="mb-8" />
+              <Separator className="mb-6 md:mb-8" />
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
                 <div className="space-y-2.5">
                   <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Full Name</Label>
                   <div className="rounded-xl bg-muted/30 border border-border h-12 px-4 flex items-center text-sm font-medium text-muted-foreground select-none">
@@ -145,7 +138,7 @@ const SettingsPage: React.FC = () => {
                 </div>
                 <div className="space-y-2.5">
                   <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Email Address</Label>
-                  <div className="rounded-xl bg-muted/30 border border-border h-12 px-4 flex items-center text-sm font-medium text-muted-foreground select-none">
+                  <div className="rounded-xl bg-muted/30 border border-border h-12 px-4 flex items-center text-sm font-medium text-muted-foreground select-none truncate">
                     {state.currentUser?.email}
                   </div>
                 </div>
@@ -174,45 +167,32 @@ const SettingsPage: React.FC = () => {
           </TabsContent>
 
           <TabsContent value="appearance" className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
-            <div className="bg-card rounded-2xl border border-border shadow-sm p-8">
-              <h3 className="text-lg font-bold mb-8 font-headline">Theme Preference</h3>
-              <div className="grid grid-cols-3 gap-6">
-                <div 
-                  onClick={() => handleThemeChange('light')}
-                  className={cn(
-                    "p-6 border-2 rounded-2xl flex flex-col items-center gap-4 cursor-pointer transition-all",
-                    state.theme === 'light' ? "border-primary bg-primary/5 ring-4 ring-primary/10 shadow-lg" : "hover:border-primary/40 border-border bg-muted/20"
-                  )}
-                >
-                  <Sun className={cn("h-8 w-8", state.theme === 'light' ? "text-primary" : "text-muted-foreground")} />
-                  <span className="text-[10px] font-bold uppercase tracking-widest">Light Mode</span>
-                </div>
-                <div 
-                  onClick={() => handleThemeChange('dark')}
-                  className={cn(
-                    "p-6 border-2 rounded-2xl flex flex-col items-center gap-4 cursor-pointer transition-all",
-                    state.theme === 'dark' ? "border-primary bg-primary/5 ring-4 ring-primary/10 shadow-lg" : "hover:border-primary/40 border-border bg-muted/20"
-                  )}
-                >
-                  <Moon className={cn("h-8 w-8", state.theme === 'dark' ? "text-primary" : "text-muted-foreground")} />
-                  <span className="text-[10px] font-bold uppercase tracking-widest">Dark Mode</span>
-                </div>
-                <div 
-                  onClick={() => handleThemeChange('system')}
-                  className={cn(
-                    "p-6 border-2 rounded-2xl flex flex-col items-center gap-4 cursor-pointer transition-all",
-                    state.theme === 'system' ? "border-primary bg-primary/5 ring-4 ring-primary/10 shadow-lg" : "hover:border-primary/40 border-border bg-muted/20"
-                  )}
-                >
-                  <Monitor className={cn("h-8 w-8", state.theme === 'system' ? "text-primary" : "text-muted-foreground")} />
-                  <span className="text-[10px] font-bold uppercase tracking-widest">System</span>
-                </div>
+            <div className="bg-card rounded-2xl border border-border shadow-sm p-4 md:p-8">
+              <h3 className="text-lg font-bold mb-5 md:mb-8 font-headline">Theme Preference</h3>
+              <div className="grid grid-cols-3 gap-3 md:gap-6">
+                {([
+                  { value: 'light', icon: Sun, label: 'Light' },
+                  { value: 'dark', icon: Moon, label: 'Dark' },
+                  { value: 'system', icon: Monitor, label: 'System' },
+                ] as const).map(({ value, icon: Icon, label }) => (
+                  <div
+                    key={value}
+                    onClick={() => handleThemeChange(value)}
+                    className={cn(
+                      "p-4 md:p-6 border-2 rounded-2xl flex flex-col items-center gap-2 md:gap-4 cursor-pointer transition-all",
+                      state.theme === value ? "border-primary bg-primary/5 ring-4 ring-primary/10 shadow-lg" : "hover:border-primary/40 border-border bg-muted/20"
+                    )}
+                  >
+                    <Icon className={cn("h-6 w-6 md:h-8 md:w-8", state.theme === value ? "text-primary" : "text-muted-foreground")} />
+                    <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-widest">{label}</span>
+                  </div>
+                ))}
               </div>
 
-              <div className="mt-12 space-y-4">
+              <div className="mt-8 md:mt-12 space-y-4">
                 <h3 className="text-lg font-bold font-headline">Localization</h3>
-                <div className="flex items-center justify-between p-5 bg-muted/30 dark:bg-muted/5 rounded-2xl border border-border/50">
-                   <div className="flex items-center gap-4">
+                <div className="flex items-center justify-between p-4 md:p-5 bg-muted/30 dark:bg-muted/5 rounded-2xl border border-border/50">
+                   <div className="flex items-center gap-3 md:gap-4">
                      <div className="p-2 bg-card rounded-lg border shadow-sm">
                        <Globe className="h-5 w-5 text-muted-foreground" />
                      </div>
@@ -225,14 +205,14 @@ const SettingsPage: React.FC = () => {
           </TabsContent>
 
           {isAdmin && (
-            <div className="flex justify-end pt-8">
+            <div className="flex justify-end pt-4 md:pt-8">
               <Button
-                className="bg-primary hover:bg-primary/90 text-white px-10 h-16 rounded-2xl shadow-xl shadow-primary/20 gap-3 transition-all hover:scale-105 active:scale-95"
+                className="w-full md:w-auto bg-primary hover:bg-primary/90 text-white px-6 md:px-10 h-12 md:h-16 rounded-2xl shadow-xl shadow-primary/20 gap-3 transition-all hover:scale-105 active:scale-95"
                 onClick={handleSave}
                 disabled={isSaving}
               >
-                {isSaving ? <Loader2 className="h-6 w-6 animate-spin" /> : <Save className="h-6 w-6" />}
-                <span className="text-xl font-bold">Save Changes</span>
+                {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
+                <span className="text-base md:text-xl font-bold">Save Changes</span>
               </Button>
             </div>
           )}

@@ -62,8 +62,9 @@ const MessageInput: React.FC = () => {
 
   useEffect(() => {
     if (textareaRef.current) {
+      const maxH = window.innerWidth < 768 ? 96 : 160; // ~4 lines on mobile
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, maxH)}px`;
     }
   }, [inputText]);
 
@@ -291,15 +292,15 @@ const MessageInput: React.FC = () => {
   }
 
   return (
-    <div className="p-6 pt-0 relative">
+    <div className="p-3 md:p-6 pt-0 relative">
       {isBlockedConversation && (
-        <div className="mb-4 rounded-2xl border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive animate-in slide-in-from-bottom-2">
+        <div className="mb-3 md:mb-4 rounded-2xl border border-destructive/20 bg-destructive/10 p-3 md:p-4 text-sm text-destructive animate-in slide-in-from-bottom-2">
           <p className="font-bold">Messages from this user are blocked.</p>
           <p className="text-xs text-destructive/80 mt-1">You will not receive new messages or notifications from this conversation until you unblock them.</p>
         </div>
       )}
       {showMentions && filteredMembers.length > 0 && (
-        <div className="absolute bottom-full left-6 right-6 mb-2 bg-card border border-border rounded-2xl shadow-2xl overflow-hidden z-30 animate-in slide-in-from-bottom-2 duration-200">
+        <div className="absolute bottom-full left-3 right-3 md:left-6 md:right-6 mb-2 bg-card border border-border rounded-2xl shadow-2xl overflow-hidden z-30 animate-in slide-in-from-bottom-2 duration-200">
           <div className="p-3 border-b border-border bg-muted/30 flex justify-between items-center">
             <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2"><AtSign className="h-3 w-3" /> Team Member</h4>
             <span className="text-[9px] text-muted-foreground font-bold">TAB TO SELECT</span>
@@ -391,7 +392,7 @@ const MessageInput: React.FC = () => {
             disabled={isEditing || isSending || isBlockedConversation}
             onPaste={handlePaste}
             placeholder={isBlockedConversation ? 'This conversation is blocked. Unblock to send messages.' : isEditing ? 'Finish editing the message above first' : `Message ${activeConversation?.name}...`}
-            className="w-full p-4 bg-transparent outline-none resize-none min-h-[56px] max-h-[160px] text-sm text-foreground placeholder:text-muted-foreground/60"
+            className="w-full p-3 md:p-4 bg-transparent outline-none resize-none min-h-[48px] md:min-h-[56px] max-h-[96px] md:max-h-[160px] text-sm text-foreground placeholder:text-muted-foreground/60"
             rows={1}
             value={inputText}
             onChange={handleInputChange}
@@ -404,13 +405,24 @@ const MessageInput: React.FC = () => {
               } else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); }
             }}
           />
-          <div className="px-4 pb-3 flex items-center justify-between">
-            <div className="flex items-center gap-1">
-              <button type="button" disabled={isEditing || isSending} className="p-2 hover:bg-muted rounded-lg text-muted-foreground hover:text-primary transition-all" onClick={() => fileInputRef.current?.click()}><Paperclip className="h-4 w-4" /></button>
-              
+          <div className="px-3 md:px-4 pb-2 md:pb-3 flex items-center justify-between">
+            <div className="flex items-center gap-0.5 md:gap-1">
+              {/* On mobile: hide attachment when text is typed to give room for send button */}
+              <button
+                type="button"
+                disabled={isEditing || isSending}
+                className={cn(
+                  "p-2 hover:bg-muted rounded-lg text-muted-foreground hover:text-primary transition-all tap-small",
+                  inputText.trim() ? "hidden md:flex" : "flex"
+                )}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Paperclip className="h-4 w-4" />
+              </button>
+
               <Popover>
                 <PopoverTrigger asChild>
-                  <button type="button" disabled={isEditing || isSending} className="p-2 hover:bg-muted rounded-lg text-muted-foreground hover:text-primary transition-all">
+                  <button type="button" disabled={isEditing || isSending} className="p-2 hover:bg-muted rounded-lg text-muted-foreground hover:text-primary transition-all tap-small">
                     <Smile className="h-4 w-4" />
                   </button>
                 </PopoverTrigger>
@@ -434,12 +446,17 @@ const MessageInput: React.FC = () => {
                 if (e.target.files) processFiles(e.target.files);
               }} />
             </div>
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               disabled={(!inputText.trim() && uploadedFiles.length === 0) || isEditing || isSending || isBlockedConversation}
-              className={cn('p-2 rounded-xl transition-all flex items-center gap-2 px-5 shadow-lg', (inputText.trim() || uploadedFiles.length > 0) && !isEditing && !isSending && !isBlockedConversation ? 'bg-primary text-white hover:bg-primary/90 hover:scale-105' : 'bg-muted text-muted-foreground cursor-not-allowed')}
+              className={cn(
+                'p-2 rounded-xl transition-all flex items-center gap-1.5 md:gap-2 px-3 md:px-5 shadow-lg',
+                (inputText.trim() || uploadedFiles.length > 0) && !isEditing && !isSending && !isBlockedConversation
+                  ? 'bg-primary text-white hover:bg-primary/90 active:scale-95'
+                  : 'bg-muted text-muted-foreground cursor-not-allowed'
+              )}
             >
-              <span className="text-[11px] font-bold uppercase tracking-widest">Send</span>
+              <span className="text-[10px] md:text-[11px] font-bold uppercase tracking-widest hidden md:inline">Send</span>
               <Send className="h-4 w-4" />
             </button>
           </div>

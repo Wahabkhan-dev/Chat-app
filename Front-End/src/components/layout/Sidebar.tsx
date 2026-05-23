@@ -212,7 +212,12 @@ const ContextMenu: React.FC<{
   );
 };
 
-const Sidebar: React.FC<{ onViewChange: (view: AppView) => void; onCreateGroup: () => void; activeView: AppView }> = ({ onViewChange, onCreateGroup, activeView }) => {
+const Sidebar: React.FC<{
+  onViewChange: (view: AppView) => void;
+  onCreateGroup: () => void;
+  activeView: AppView;
+  onConversationSelect?: () => void;
+}> = ({ onViewChange, onCreateGroup, activeView, onConversationSelect }) => {
   const { state, dispatch } = useAppContext();
   const [activeTab, setActiveTab] = useState<'dm' | 'groups'>('dm');
   const [sidebarSearch, setSidebarSearch] = useState('');
@@ -292,7 +297,7 @@ const Sidebar: React.FC<{ onViewChange: (view: AppView) => void; onCreateGroup: 
   };
 
   return (
-    <div className="w-[280px] bg-card text-card-foreground border-r border-border h-full flex flex-col shrink-0 relative z-20 shadow-xl overflow-hidden">
+    <div className="w-full h-full bg-card text-card-foreground flex flex-col relative z-20 shadow-xl overflow-hidden">
       <div className="p-5 border-b border-border bg-card/50">
         <div className="flex items-center gap-3 mb-5">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-2xl relative overflow-hidden shrink-0 bg-transparent">
@@ -309,7 +314,8 @@ const Sidebar: React.FC<{ onViewChange: (view: AppView) => void; onCreateGroup: 
         </div>
       </div>
 
-      <div className="p-3 border-b border-border space-y-1 bg-muted/5">
+      {/* View switcher — desktop only. Mobile uses the bottom nav */}
+      <div className="hidden md:block p-3 border-b border-border space-y-1 bg-muted/5">
         <button onClick={() => onViewChange('chat')} className={cn('w-full flex items-center gap-3 p-2.5 rounded-xl transition-all font-bold', activeView === 'chat' ? 'bg-primary/10 text-primary shadow-sm' : 'hover:bg-muted text-muted-foreground')}>
           <MessageSquare className="h-4 w-4" />
           <span className="text-[13px] uppercase tracking-wider">Workspace Chat</span>
@@ -338,6 +344,7 @@ const Sidebar: React.FC<{ onViewChange: (view: AppView) => void; onCreateGroup: 
               onClick={() => {
                 dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type: 'dm', id: convId, name: user.name, avatar: user.avatar } });
                 if (!isDeactivated) getSocket()?.emit('join_dm', { otherUserId: user.id });
+                onConversationSelect?.();
               }}
               className={cn(
                 'w-full flex items-center gap-3 p-2.5 rounded-xl transition-all group border border-transparent relative',
@@ -387,7 +394,10 @@ const Sidebar: React.FC<{ onViewChange: (view: AppView) => void; onCreateGroup: 
                 <button
                   key={group.id}
                   onContextMenu={e => !hasLeft && handleContextMenu(e, group.id, group.name, 'group')}
-                  onClick={() => dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type: 'group', id: group.id, name: group.name, avatar: group.avatar } })}
+                  onClick={() => {
+                    dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type: 'group', id: group.id, name: group.name, avatar: group.avatar } });
+                    onConversationSelect?.();
+                  }}
                   className={cn(
                     'w-full flex items-center gap-3 p-2.5 rounded-xl transition-all group border border-transparent relative',
                     hasLeft ? 'opacity-50' : isActive ? 'bg-primary/5 text-primary border-primary/10' : 'hover:bg-muted text-muted-foreground'
@@ -461,7 +471,8 @@ const Sidebar: React.FC<{ onViewChange: (view: AppView) => void; onCreateGroup: 
       </div>
 
       <div className="p-4 border-t border-border space-y-2 bg-muted/10">
-        {state.currentUser?.role === 'admin' && <button onClick={() => onViewChange('admin')} className={cn('w-full flex items-center gap-3 p-2.5 rounded-xl transition-all shadow-md font-bold', activeView === 'admin' ? 'bg-primary text-white' : 'bg-card border border-border hover:bg-muted text-muted-foreground')}><Shield className="h-4 w-4" /><span className="text-[13px] uppercase tracking-wider">Admin Control</span></button>}
+        {/* Admin + Settings buttons only on desktop — mobile uses bottom nav */}
+        {state.currentUser?.role === 'admin' && <button onClick={() => onViewChange('admin')} className={cn('hidden md:flex w-full items-center gap-3 p-2.5 rounded-xl transition-all shadow-md font-bold', activeView === 'admin' ? 'bg-primary text-white' : 'bg-card border border-border hover:bg-muted text-muted-foreground')}><Shield className="h-4 w-4" /><span className="text-[13px] uppercase tracking-wider">Admin Control</span></button>}
         <div className="flex items-center justify-between p-2.5 rounded-2xl bg-card border border-border shadow-xl ring-1 ring-black/5">
           <div className="flex items-center gap-3 min-w-0">
             <div

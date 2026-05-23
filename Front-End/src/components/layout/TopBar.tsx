@@ -4,7 +4,7 @@
 import React, { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppContext } from '@/context/AppContext';
-import { Bell, Search, UserPlus, X, MessageSquare, AtSign, UserPlus2, ShieldAlert, VolumeX } from 'lucide-react';
+import { Bell, Search, UserPlus, X, MessageSquare, AtSign, UserPlus2, ShieldAlert, VolumeX, Menu } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Avatar } from '../ui/avatar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -79,7 +79,7 @@ const NotificationRow: React.FC<{ notification: any; onClick: () => void }> = ({
   );
 };
 
-const TopBar: React.FC<{ onCreateUser: () => void }> = ({ onCreateUser }) => {
+const TopBar: React.FC<{ onCreateUser: () => void; onMenuToggle?: () => void }> = ({ onCreateUser, onMenuToggle }) => {
   const { state, dispatch } = useAppContext();
   
   const myNotifications = useMemo(() =>
@@ -136,7 +136,16 @@ const TopBar: React.FC<{ onCreateUser: () => void }> = ({ onCreateUser }) => {
   };
 
   return (
-    <div className="h-14 border-b bg-card text-card-foreground flex items-center justify-between px-6 shrink-0 relative z-50 shadow-sm">
+    <div className="h-14 border-b bg-card text-card-foreground flex items-center justify-between px-3 md:px-6 shrink-0 relative z-50 shadow-sm gap-2">
+      {/* Hamburger — mobile only, shows conversation list */}
+      <button
+        className="md:hidden p-2 hover:bg-muted rounded-full text-muted-foreground shrink-0"
+        onClick={onMenuToggle}
+        aria-label="Open conversations"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
+
       <div className="flex-1 max-w-2xl relative mx-auto group">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
@@ -219,9 +228,9 @@ const TopBar: React.FC<{ onCreateUser: () => void }> = ({ onCreateUser }) => {
         )}
       </div>
 
-      <div className="flex items-center gap-3 ml-4">
+      <div className="flex items-center gap-1 md:gap-3 ml-1 md:ml-4 shrink-0">
         {state.currentUser?.role === 'admin' && (
-          <button onClick={onCreateUser} className="p-2 hover:bg-muted rounded-full transition-all text-muted-foreground hover:text-primary flex items-center gap-2 px-3 border border-transparent hover:border-primary/20">
+          <button onClick={onCreateUser} className="p-2 hover:bg-muted rounded-full transition-all text-muted-foreground hover:text-primary flex items-center gap-2 md:px-3 border border-transparent hover:border-primary/20">
             <UserPlus className="h-4 w-4" />
             <span className="text-[11px] font-bold uppercase tracking-widest hidden md:inline">Add Member</span>
           </button>

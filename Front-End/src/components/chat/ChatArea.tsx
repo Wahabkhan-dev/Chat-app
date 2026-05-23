@@ -6,7 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/lib/api';
 import { getSocket } from '@/services/socket';
-import { Search, Info, X, ChevronDown, VolumeX, Lock, Pin } from 'lucide-react';
+import { Search, Info, X, ChevronDown, VolumeX, Lock, Pin, ArrowLeft } from 'lucide-react';
 import { Avatar } from '../ui/avatar';
 import MessageBubble from './MessageBubble';
 import { Message } from '@/mock/messages';
@@ -36,7 +36,7 @@ const DateDivider: React.FC<{ date: string }> = ({ date }) => {
   );
 };
 
-const ChatArea: React.FC = () => {
+const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const { state, dispatch } = useAppContext();
   const [isDragging, setIsDragging] = useState(false);
   const [showScrollPill, setShowScrollPill] = useState(false);
@@ -207,13 +207,13 @@ const ChatArea: React.FC = () => {
 
   if (!state.activeConversation) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-background p-8 text-center animate-in fade-in">
-        <div className="w-64 h-24 mb-8 relative">
+      <div className="flex-1 flex flex-col items-center justify-center bg-background p-6 text-center animate-in fade-in">
+        <div className="w-48 md:w-64 h-16 md:h-24 mb-6 md:mb-8 relative">
           <Image src={BRAND_LOGO_URL} alt="Mawby Teams logo" fill className="object-contain dark:hidden" />
           <Image src={BRAND_LOGO_DARK_URL} alt="Mawby Teams logo" fill className="object-contain hidden dark:block" />
         </div>
-        <h2 className="text-2xl font-bold font-headline mb-2">Select a conversation</h2>
-        <p className="text-muted-foreground max-w-md">Choose from your team members or groups to start collaborating.</p>
+        <h2 className="text-xl md:text-2xl font-bold font-headline mb-2">Select a conversation</h2>
+        <p className="text-muted-foreground max-w-md text-sm">Choose from your team members or groups to start collaborating.</p>
       </div>
     );
   }
@@ -226,9 +226,18 @@ const ChatArea: React.FC = () => {
       onDrop={handleDrop}
     >
       {/* Header */}
-      <div className="h-14 border-b border-border bg-card text-card-foreground flex items-center justify-between px-6 shrink-0 z-20 shadow-sm">
-        <div 
-          className="flex items-center gap-3 cursor-pointer group/header hover:opacity-90 transition-all active:scale-[0.98]"
+      <div className="h-14 border-b border-border bg-card text-card-foreground flex items-center justify-between px-3 md:px-6 shrink-0 z-20 shadow-sm gap-1">
+        {/* Back button — mobile only */}
+        <button
+          onClick={onBack}
+          className="md:hidden p-2 hover:bg-muted rounded-full text-muted-foreground shrink-0"
+          aria-label="Back to conversations"
+        >
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+
+        <div
+          className="flex items-center gap-2 md:gap-3 cursor-pointer group/header hover:opacity-90 transition-all active:scale-[0.98] flex-1 min-w-0"
           onClick={() => dispatch({ type: 'TOGGLE_RIGHT_PANEL', payload: true })}
         >
           <Avatar
@@ -268,7 +277,7 @@ const ChatArea: React.FC = () => {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0 md:gap-1 shrink-0">
           <button
             onClick={() => dispatch({ type: 'SET_CHAT_SEARCH', payload: { active: !state.chatUI.isSearchActive, query: '' } })}
             className={cn('p-2 rounded-full transition-all h-9 w-9 flex items-center justify-center', state.chatUI.isSearchActive ? 'bg-muted text-primary' : 'hover:bg-muted text-muted-foreground')}
@@ -322,8 +331,8 @@ const ChatArea: React.FC = () => {
       )}
 
       {/* Messages */}
-      <div 
-        className="flex-1 overflow-y-auto p-6 scrollbar-hide scroll-smooth relative" 
+      <div
+        className="flex-1 overflow-y-auto p-3 md:p-6 scrollbar-hide scroll-smooth relative touch-scroll"
         ref={scrollRef}
         onScroll={handleScroll}
       >
@@ -377,9 +386,9 @@ const ChatArea: React.FC = () => {
 
       {/* Scroll Pill */}
       {showScrollPill && (
-        <button 
+        <button
           onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })}
-          className="absolute bottom-24 right-8 bg-primary text-white p-2.5 rounded-full shadow-2xl hover:scale-110 transition-all z-30 animate-in bounce-in"
+          className="absolute bottom-24 right-4 md:right-8 bg-primary text-white p-2.5 rounded-full shadow-2xl hover:scale-110 transition-all z-30 animate-in bounce-in"
         >
           <ChevronDown className="h-5 w-5" />
         </button>

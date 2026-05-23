@@ -97,3 +97,48 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Mobile touch scrolling */
+.touch-scroll {
+  -webkit-overflow-scrolling: touch;
+  overflow-y: auto;
+}
+
+/* Safe area support for notched phones */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Mobile-only sidebar backdrop */
+.mobile-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 45;
+  backdrop-filter: blur(2px);
+}
+
+/* Bottom nav height token */
+:root {
+  --bottom-nav-h: 64px;
+}
+
+/* Ensure no horizontal overflow on mobile */
+@media (max-width: 767px) {
+  body {
+    overflow-x: hidden;
+  }
+  /* Minimum tap target */
+  button, [role="button"], a {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* Exception for icon-only buttons in chat bubbles */
+  .tap-small {
+    min-height: unset;
+    min-width: unset;
+  }
+}
