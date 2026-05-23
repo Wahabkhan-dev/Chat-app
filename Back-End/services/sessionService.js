@@ -187,9 +187,12 @@ async function cleanupExpiredData() {
       `DELETE FROM user_sessions WHERE expires_at < NOW() OR logged_out_at < DATE_SUB(NOW(), INTERVAL 7 DAY)`
     );
 
-    // Delete expired blacklisted tokens
+    // Delete old blacklisted tokens — tokens never expire (999y), so clean up
+    // based on when they were blacklisted rather than their expiry date.
+    // 90 days is safely longer than the 7-day logged-out session retention,
+    // so the session row check still blocks the token even after it's removed here.
     const [blacklistResult] = await pool.query(
-      `DELETE FROM token_blacklist WHERE expires_at < NOW()`
+      `DELETE FROM token_blacklist WHERE blacklist_at < DATE_SUB(NOW(), INTERVAL 90 DAY)`
     );
 
     console.log(

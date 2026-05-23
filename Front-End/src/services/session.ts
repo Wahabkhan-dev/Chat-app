@@ -1,6 +1,7 @@
 /**
  * Session Manager Service
- * Handles session lifecycle, token expiration, and cleanup
+ * Sessions persist until the user explicitly logs out — no inactivity timeout,
+ * no automatic expiry. Only explicit logout blacklists the token server-side.
  */
 
 import { clearToken, getToken } from '@/lib/api';
@@ -16,13 +17,6 @@ export interface SessionInfo {
 }
 
 const SESSION_STORAGE_KEY = 'mawby_session_info';
-const SESSION_ACTIVITY_INTERVAL = 60000; // 1 minute
-const INACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 minutes
-const TOKEN_REFRESH_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours (adjust based on JWT_EXPIRES_IN)
-
-let sessionActivityInterval: NodeJS.Timeout | null = null;
-let inactivityTimeout: NodeJS.Timeout | null = null;
-let onSessionExpiredCallback: (() => void) | null = null;
 
 /**
  * Generate unique session ID
@@ -53,9 +47,6 @@ export function initializeSession(
   } catch (error) {
     console.error('Error saving session info:', error);
   }
-
-  startActivityTracking();
-  startInactivityMonitoring();
 
   return sessionInfo;
 }
@@ -91,105 +82,6 @@ export function updateActivity(): void {
 }
 
 /**
- * Start tracking user activity
- */
-function startActivityTracking(): void {
-  if (sessionActivityInterval) {
-    clearInterval(sessionActivityInterval);
-  }
-
-  const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
-  const onActivity = () => {
-    updateActivity();
-    resetInactivityTimeout();
-  };
-
-  events.forEach((event) => {
-    document.addEventListener(event, onActivity, true);
-  });
-
-  // Cleanup function
-  const cleanup = () => {
-    events.forEach((event) => {
-      document.removeEventListener(event, onActivity, true);
-    });
-  };
-
-  // Store cleanup function for later
-  (window as any).__sessionActivityCleanup = cleanup;
-}
-
-/**
- * Start monitoring for inactivity
- */
-function startInactivityMonitoring(): void {
-  resetInactivityTimeout();
-}
-
-/**
- * Reset inactivity timeout
- */
-function resetInactivityTimeout(): void {
-  if (inactivityTimeout) {
-    clearTimeout(inactivityTimeout);
-  }
-
-  inactivityTimeout = setTimeout(() => {
-    handleInactivityTimeout();
-  }, INACTIVITY_TIMEOUT);
-}
-
-/**
- * Handle inactivity timeout
- */
-function handleInactivityTimeout(): void {
-  console.warn('Session expired due to inactivity');
-  destroySession();
-
-  if (onSessionExpiredCallback) {
-    onSessionExpiredCallback();
-  }
-}
-
-/**
- * Check if session is expired
- */
-export function isSessionExpired(): boolean {
-  const session = getSessionInfo();
-  if (!session) return true;
-
-  const now = Date.now();
-  const inactiveTime = now - session.lastActivity;
-
-  // Check inactivity (30 minutes)
-  if (inactiveTime > INACTIVITY_TIMEOUT) {
-    return true;
-  }
-
-  // Check token expiry
-  if (now > session.tokenExpiry) {
-    return true;
-  }
-
-  return false;
-}
-
-/**
- * Get remaining session time in milliseconds
- */
-export function getRemainingSessionTime(): number {
-  const session = getSessionInfo();
-  if (!session) return 0;
-
-  const now = Date.now();
-  const inactiveTime = now - session.lastActivity;
-  const remainingInactivity = INACTIVITY_TIMEOUT - inactiveTime;
-  const remainingToken = session.tokenExpiry - now;
-
-  return Math.min(remainingInactivity, remainingToken);
-}
-
-/**
  * Get session duration in minutes
  */
 export function getSessionDurationMinutes(): number {
@@ -201,69 +93,13 @@ export function getSessionDurationMinutes(): number {
 }
 
 /**
- * Warn user before session expires (5 minutes)
- */
-export function onSessionAboutToExpire(
-  callback: (remainingSeconds: number) => void
-): () => void {
-  const interval = setInterval(() => {
-    const remaining = getRemainingSessionTime();
-
-    // Warn when 5 minutes left
-    if (remaining <= 5 * 60 * 1000 && remaining > 0) {
-      callback(Math.floor(remaining / 1000));
-    }
-
-    // Clear interval if session expired
-    if (remaining <= 0) {
-      clearInterval(interval);
-    }
-  }, 10000); // Check every 10 seconds
-
-  return () => clearInterval(interval);
-}
-
-/**
- * Register callback for session expiration
- */
-export function onSessionExpired(callback: () => void): () => void {
-  onSessionExpiredCallback = callback;
-  return () => {
-    onSessionExpiredCallback = null;
-  };
-}
-
-/**
- * Destroy session (logout)
+ * Destroy session (called on explicit logout)
  */
 export function destroySession(): void {
   try {
-    // Clear session info
     localStorage.removeItem(SESSION_STORAGE_KEY);
-
-    // Clear token
     clearToken();
-
-    // Clear settings
     clearSettings();
-
-    // Clear activity tracking
-    if ((window as any).__sessionActivityCleanup) {
-      (window as any).__sessionActivityCleanup();
-    }
-
-    // Clear timeouts
-    if (sessionActivityInterval) {
-      clearInterval(sessionActivityInterval);
-      sessionActivityInterval = null;
-    }
-
-    if (inactivityTimeout) {
-      clearTimeout(inactivityTimeout);
-      inactivityTimeout = null;
-    }
-
-    // Dispatch custom event
     window.dispatchEvent(new CustomEvent('sessionDestroyed'));
   } catch (error) {
     console.error('Error destroying session:', error);
@@ -276,34 +112,25 @@ export function destroySession(): void {
 export function clearAllSessions(): void {
   destroySession();
 
-  // Notify other tabs
+  // Notify other tabs via storage event
   const storageEvent = new StorageEvent('storage', {
     key: SESSION_STORAGE_KEY,
     newValue: null,
-    oldValue: getSessionInfo() ? JSON.stringify(getSessionInfo()) : null,
+    oldValue: null,
     storageArea: localStorage,
     url: window.location.href,
   });
-
   window.dispatchEvent(storageEvent);
 }
 
 /**
- * Sync session across tabs
+ * Sync logout across tabs — when one tab logs out, all tabs follow
  */
 export function setupCrossTabSync(): void {
   window.addEventListener('storage', (event) => {
-    if (event.key === SESSION_STORAGE_KEY) {
-      if (event.newValue === null) {
-        // Session destroyed in another tab
-        destroySession();
-      }
+    if (event.key === SESSION_STORAGE_KEY && event.newValue === null) {
+      destroySession();
     }
-  });
-
-  // Listen for session destroyed event from same tab
-  window.addEventListener('sessionDestroyed', () => {
-    console.log('Session destroyed, redirecting to login...');
   });
 }
 
@@ -315,14 +142,13 @@ export function getSessionSummary(): Record<string, any> {
   const token = getToken();
 
   return {
-    isActive: !isSessionExpired(),
+    isActive: !!token && !!session,
     hasToken: !!token,
     sessionInfo: session
       ? {
           userId: session.userId,
           email: session.email,
           durationMinutes: getSessionDurationMinutes(),
-          remainingTime: getRemainingSessionTime(),
           lastActivity: new Date(session.lastActivity).toISOString(),
         }
       : null,

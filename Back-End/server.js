@@ -273,6 +273,10 @@ async function addIndexIfMissing(table, indexName, definition) {
         INDEX idx_fm_user_id (user_id),
         INDEX idx_fm_uploaded_at (uploaded_at)
       )`),
+      // Upgrade expires_at from TIMESTAMP to DATETIME so 999y tokens don't hit the
+      // MySQL TIMESTAMP ceiling of 2038-01-19. DATETIME supports up to year 9999.
+      async () => pool.query(`ALTER TABLE user_sessions MODIFY COLUMN expires_at DATETIME NOT NULL`),
+      async () => pool.query(`ALTER TABLE token_blacklist MODIFY COLUMN expires_at DATETIME NOT NULL`),
       // Add performance indexes
       async () => addIndexIfMissing('users', 'idx_email', '(email)'),
       async () => addIndexIfMissing('users', 'idx_status', '(status)'),

@@ -20,13 +20,21 @@ export function useSharedFilesLoader() {
         const files1 = Array.isArray(resp1?.files) ? resp1.files : [];
         const files2 = Array.isArray(resp2?.files) ? resp2.files : [];
 
-        // Merge and dedupe by id
-        const map = new Map<string, SharedFile>();
+        // First-pass: dedupe by id
+        const byId = new Map<string, SharedFile>();
         for (const f of [...files1, ...files2]) {
-          const existing = map.get(f.id);
-          map.set(f.id, existing ? { ...existing, ...f } : f);
+          const existing = byId.get(f.id);
+          byId.set(f.id, existing ? { ...existing, ...f } : f);
         }
-        const merged = Array.from(map.values());
+
+        // Second-pass: dedupe by R2 key — same physical file can appear from both
+        // endpoints with different ID schemes (f_${msgId}_${key} vs m_${row.id})
+        const byKey = new Map<string, SharedFile>();
+        for (const f of Array.from(byId.values())) {
+          const k = f.key || f.id;
+          if (!byKey.has(k)) byKey.set(k, f);
+        }
+        const merged = Array.from(byKey.values());
 
         dispatch({ type: 'LOAD_SHARED_FILES', payload: merged });
         console.log('[useSharedFilesLoader] Loaded', merged.length, 'shared files (merged)');

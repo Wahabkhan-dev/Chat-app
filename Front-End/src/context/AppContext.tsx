@@ -6,19 +6,12 @@ import { User, UserStatus } from '@/mock/users';
 import { Group } from '@/mock/groups';
 import { Message, MessageFile } from '@/mock/messages';
 import { SharedFile } from '@/mock/files';
-import { getCurrentUser, forceLogout } from '@/services/auth';
+import { getCurrentUser } from '@/services/auth';
 import { api } from '@/lib/api';
 import { getToken } from '@/lib/api';
 import { loadSettings, onSettingsChanged, onSettingsCleared, UserSettings } from '@/services/settings';
 import { fetchConversationMetadata } from '@/services/conversationMetadata';
-import {
-  getSessionInfo,
-  setupCrossTabSync,
-  onSessionExpired,
-  isSessionExpired,
-  getRemainingSessionTime,
-  onSessionAboutToExpire,
-} from '@/services/session';
+import { setupCrossTabSync } from '@/services/session';
 
 export type AppView = 'chat' | 'admin' | 'files' | 'settings';
 export type ConversationType = 'dm' | 'group';
@@ -568,8 +561,9 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
       // Strip @[Name](id) → @Name for display in preview
       const displayContent = (message.content || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1');
 
+      // Stable IDs (matching LOAD_MESSAGES pattern) so subsequent dedup checks can catch these
       const newFiles: SharedFile[] = (message.files || []).map(f => ({
-        id: `f_${Date.now()}_${Math.random()}`,
+        id: `f_${message.id}_${f.key || f.name}`,
         name: f.name,
         size: f.size || '',
         type: f.type,
@@ -597,9 +591,10 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         };
       });
 
+      // Stable IDs for message.links; urlLinks that aren't in message.links are appended
       const newLinks: SharedFile[] = [
         ...(message.links || []).map((l: any) => ({
-          id: `l_${Date.now()}_${Math.random()}`,
+          id: `l_${message.id}_${l.url}`,
           name: l.title || l.url,
           size: l.domain,
           type: 'link' as const,
@@ -611,10 +606,15 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         ...urlLinks.filter(ul => !(message.links || []).some((l: any) => l.url === ul.previewUrl)),
       ];
 
+      // Dedup: skip any entry whose ID already exists in sharedFiles
+      const incomingShared = [...newFiles, ...newLinks].filter(
+        nf => !state.sharedFiles.some(existing => existing.id === nf.id)
+      );
+
       return {
         ...state,
         messages: { ...state.messages, [conversationId]: [...(state.messages[conversationId] || []), message] },
-        sharedFiles: [...state.sharedFiles, ...newFiles, ...newLinks],
+        sharedFiles: [...state.sharedFiles, ...incomingShared],
         conversationMeta: {
           ...state.conversationMeta,
           [conversationId]: {
@@ -1072,40 +1072,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   }, [state.theme]);
 
-  // Monitor session expiration and show warning
-  useEffect(() => {
-    if (!state.currentUser) return;
-
-    const unsubscribeWarning = onSessionAboutToExpire((remainingSeconds) => {
-      dispatch({
-        type: 'SHOW_SESSION_WARNING',
-        payload: remainingSeconds,
-      });
-    });
-
-    const unsubscribeExpired = onSessionExpired(() => {
-      console.warn('Session expired - logging out');
-      dispatch({ type: 'ADD_TOAST', payload: { message: 'Your session has expired. Please log in again.', type: 'error' } });
-      dispatch({ type: 'LOGOUT' });
-      forceLogout();
-    });
-
-    // Check session status periodically
-    const sessionCheckInterval = setInterval(() => {
-      if (isSessionExpired()) {
-        console.warn('Session expired detected');
-        dispatch({ type: 'ADD_TOAST', payload: { message: 'Your session has expired. Please log in again.', type: 'error' } });
-        dispatch({ type: 'LOGOUT' });
-        forceLogout();
-      }
-    }, 30000); // Check every 30 seconds
-
-    return () => {
-      clearInterval(sessionCheckInterval);
-      unsubscribeWarning();
-      unsubscribeExpired();
-    };
-  }, [state.currentUser]);
 
   // Restore conversation meta (unread counts, pins, mutes) from localStorage on login
   useEffect(() => {
@@ -1202,15 +1168,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const restoreSession = async () => {
       const token = getToken();
-      const session = getSessionInfo();
-
-      // Check if session is expired
-      if (isSessionExpired()) {
-        console.log('Session expired, clearing local storage');
-        dispatch({ type: 'LOGOUT' });
-        forceLogout();
-        return;
-      }
 
       if (!token) return;
 

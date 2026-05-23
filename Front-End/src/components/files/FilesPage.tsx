@@ -104,8 +104,8 @@ const FilesPage: React.FC = () => {
       return;
     }
 
-    const ids = conversationId.split('_');
-    const otherUserId = ids.find(id => id !== state.currentUser?.id);
+    const [, a, b] = conversationId.split('_');
+    const otherUserId = String(state.currentUser?.id) === a ? b : a;
     const user = state.users.find(u => u.id === otherUserId);
 
     if (user) {

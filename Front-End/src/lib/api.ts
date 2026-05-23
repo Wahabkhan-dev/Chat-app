@@ -16,7 +16,6 @@ export function clearToken() {
 async function request<T>(
   endpoint: string,
   options: RequestInit = {},
-  isRetry: boolean = false
 ): Promise<T> {
   const token = getToken();
 
@@ -36,33 +35,7 @@ async function request<T>(
 
   const data = await res.json();
 
-  // If 403 Forbidden and not already retrying, try to refresh token
-  if (res.status === 403 && !isRetry && endpoint !== '/auth/refresh') {
-    try {
-      const refreshRes = await fetch(`${BASE_URL}/auth/refresh`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      const refreshData = await refreshRes.json();
-
-      if (refreshRes.ok && refreshData.token) {
-        saveToken(refreshData.token);
-        // Retry the original request with new token
-        return request<T>(endpoint, options, true);
-      } else {
-        clearToken();
-        throw new Error('Session expired. Please login again.');
-      }
-    } catch (err) {
-      clearToken();
-      throw err;
-    }
-  }
-  // If 401 Unauthorized, clear token immediately
+  // 401 = no token / token structurally invalid — clear and surface the error
   if (res.status === 401) {
     clearToken();
     throw new Error('Unauthorized. Please login again.');
