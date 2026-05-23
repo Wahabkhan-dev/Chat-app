@@ -23,6 +23,13 @@ interface LoginResponse {
   user: AuthUser;
 }
 
+export interface LoginInitiateResponse {
+  success: true;
+  requiresOTP: true;
+  message: string;
+  maskedEmail: string;
+}
+
 interface MeResponse {
   user: AuthUser;
 }
@@ -33,16 +40,36 @@ interface RefreshResponse {
   user: AuthUser;
 }
 
+export async function initiateLogin(email: string, password: string): Promise<LoginInitiateResponse> {
+  return api.post<LoginInitiateResponse>('/auth/login', { email, password });
+}
+
+export async function verifyOTP(email: string, otpCode: string): Promise<AuthUser> {
+  const data = await api.post<LoginResponse>('/auth/verify-otp', { email, otp_code: otpCode });
+  saveToken(data.token);
+
+  try {
+    const decoded: any = jwtDecode(data.token);
+    const tokenExpiry = (decoded.exp || 0) * 1000;
+    initializeSession(data.user.id, data.user.email, tokenExpiry);
+  } catch (error) {
+    console.error('Error decoding token after OTP:', error);
+  }
+
+  return data.user;
+}
+
+export async function resendOTP(email: string): Promise<{ success: boolean; message: string }> {
+  return api.post('/auth/resend-otp', { email });
+}
+
 export async function loginUser(email: string, password: string): Promise<AuthUser> {
   const data = await api.post<LoginResponse>('/auth/login', { email, password });
   saveToken(data.token);
 
-  // Decode token to get expiry time
   try {
     const decoded: any = jwtDecode(data.token);
-    const tokenExpiry = (decoded.exp || 0) * 1000; // Convert to milliseconds
-
-    // Initialize session with token expiry
+    const tokenExpiry = (decoded.exp || 0) * 1000;
     initializeSession(data.user.id, data.user.email, tokenExpiry);
   } catch (error) {
     console.error('Error decoding token:', error);

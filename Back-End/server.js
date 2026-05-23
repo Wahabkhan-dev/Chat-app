@@ -277,6 +277,20 @@ async function addIndexIfMissing(table, indexName, definition) {
       // MySQL TIMESTAMP ceiling of 2038-01-19. DATETIME supports up to year 9999.
       async () => pool.query(`ALTER TABLE user_sessions MODIFY COLUMN expires_at DATETIME NOT NULL`),
       async () => pool.query(`ALTER TABLE token_blacklist MODIFY COLUMN expires_at DATETIME NOT NULL`),
+      // Create login_otps table for OTP-based email verification
+      async () => pool.query(`CREATE TABLE IF NOT EXISTS login_otps (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        email VARCHAR(150) NOT NULL,
+        otp_code VARCHAR(6) NOT NULL,
+        attempts INT DEFAULT 0,
+        expires_at TIMESTAMP NOT NULL,
+        is_used TINYINT(1) DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_email (email),
+        INDEX idx_expires_at (expires_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`),
       // Add performance indexes
       async () => addIndexIfMissing('users', 'idx_email', '(email)'),
       async () => addIndexIfMissing('users', 'idx_status', '(status)'),
@@ -322,6 +336,18 @@ setInterval(async () => {
     console.error('Error during scheduled cleanup:', err.message);
   }
 }, 60 * 60 * 1000); // 1 hour
+
+// Cleanup expired OTPs every 30 minutes
+setInterval(async () => {
+  try {
+    const [result] = await pool.query('DELETE FROM login_otps WHERE expires_at < NOW()');
+    if (result.affectedRows > 0) {
+      console.log(`[cleanup] Deleted ${result.affectedRows} expired OTP(s)`);
+    }
+  } catch (err) {
+    console.error('[cleanup] OTP cleanup error:', err.message);
+  }
+}, 30 * 60 * 1000);
 
 // Periodic optimization service cleanup
 setInterval(() => {
