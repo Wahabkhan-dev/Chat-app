@@ -592,6 +592,30 @@ export function useSocket() {
       });
     });
 
+    socket.on('user_deleted', async ({ userId }) => {
+      dispatch({ type: 'DELETE_USER', payload: String(userId) });
+      // Re-fetch directory to stay in sync (deleted user will not appear)
+      try {
+        const res = await api.get<{ users: any[] }>('/users/directory');
+        if (res && Array.isArray(res.users)) {
+          dispatch({
+            type: 'SET_USERS',
+            payload: res.users.map((u: any) => ({
+              id: String(u.id),
+              name: u.name,
+              email: u.email,
+              role: u.role,
+              avatar: u.avatar || '',
+              status: u.status || 'offline',
+              department: u.department || '',
+              createdAt: u.created_at ? String(u.created_at) : new Date().toISOString(),
+              isActive: u.is_active === 1,
+            })),
+          });
+        }
+      } catch { /* best-effort */ }
+    });
+
     socket.on('conversation_metadata_updated', ({ conversationId, userId, action, value }) => {
       const s = stateRef.current;
       if (String(userId) !== String(s.currentUser?.id) || !conversationId) return;

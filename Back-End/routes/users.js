@@ -262,6 +262,13 @@ router.delete('/:id', authenticateToken, requireAdmin, async (req, res) => {
     await pool.query('DELETE FROM notification_reads WHERE user_id = ?', [id]);
     await pool.query('DELETE FROM notifications WHERE recipient_id = ?', [id]);
     await pool.query('DELETE FROM users WHERE id = ?', [id]);
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${id}`).emit('force_logout', { reason: 'account_deleted' });
+      io.emit('user_deleted', { userId: id });
+    }
+
     res.json({ message: 'User permanently deleted.' });
   } catch (err) {
     console.error(err);

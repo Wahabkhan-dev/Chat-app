@@ -547,10 +547,13 @@ const RightPanel: React.FC = () => {
                   <button onClick={handleSaveGroupName} className="p-1.5 bg-primary text-white rounded-lg hover:bg-primary/90"><Save className="h-4 w-4" /></button>
                 </div>
               ) : (
-                <div className="mt-4 flex items-center gap-2">
-                  <h2 className="text-xl font-bold font-headline text-foreground">{group?.name}</h2>
+                <div className="mt-4 flex items-center gap-2 min-w-0 max-w-full px-2">
+                  <h2
+                    className="text-xl font-bold font-headline text-foreground truncate min-w-0"
+                    title={group?.name}
+                  >{group?.name}</h2>
                   {isMeAdmin && (
-                    <button onClick={() => { setEditingName(group?.name || ''); setIsEditingName(true); }} className="p-1 text-muted-foreground hover:text-primary">
+                    <button onClick={() => { setEditingName(group?.name || ''); setIsEditingName(true); }} className="p-1 text-muted-foreground hover:text-primary shrink-0">
                       <Edit className="h-3.5 w-3.5" />
                     </button>
                   )}
@@ -620,7 +623,10 @@ const RightPanel: React.FC = () => {
           return (
             <div className="p-6 flex flex-col items-center text-center">
               <Avatar name={user?.name || ''} src={user?.avatar} size="xl" status={user?.status} showStatus />
-              <h2 className="mt-4 text-xl font-bold font-headline text-foreground">{user?.name}</h2>
+              <h2
+                className="mt-4 text-xl font-bold font-headline text-foreground w-full truncate px-2"
+                title={user?.name}
+              >{user?.name}</h2>
               <Badge variant="secondary" className="mt-2 bg-secondary/10 text-secondary border-none uppercase tracking-tighter">{user?.role}</Badge>
               
               <div className="w-full mt-8 space-y-4 text-left">
@@ -971,14 +977,14 @@ const RightPanel: React.FC = () => {
       {/* Mobile: full-screen backdrop */}
       {panel.open && (
         <div
-          className="fixed inset-0 bg-black/40 z-[var(--z-right-panel)] md:hidden"
+          className="fixed inset-x-0 top-14 bottom-0 bg-black/40 z-[var(--z-right-panel)] md:hidden"
           onClick={handleClose}
         />
       )}
     <div
       className={cn(
         "border-l bg-card text-card-foreground flex flex-col shrink-0 fixed right-0 transition-transform duration-300 z-[var(--z-right-panel)] shadow-2xl",
-        "top-0 h-[100dvh]",
+        "top-14 h-[calc(100dvh-3.5rem)]",
         "md:top-[56px] md:h-[calc(100vh-56px)]",
         panel.open ? "translate-x-0" : "translate-x-full shadow-none"
       )}
@@ -990,9 +996,15 @@ const RightPanel: React.FC = () => {
         onMouseDown={handleResizeMouseDown}
       />
       {/* Panel Header */}
-      <div className="h-14 border-b flex items-center justify-between px-6 bg-card/50">
-        <h3 className="font-bold text-sm">{isGroup ? 'Group Info' : 'User Profile'}</h3>
-        <button onClick={handleClose} className="p-2 hover:bg-muted rounded-full text-muted-foreground"><X className="h-4 w-4" /></button>
+      <div className="h-14 border-b flex items-center justify-between px-4 bg-card/50 shrink-0">
+        <h3 className="font-bold text-sm truncate">{isGroup ? 'Group Info' : 'User Profile'}</h3>
+        <button
+          onClick={handleClose}
+          aria-label="Close panel"
+          className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0"
+        >
+          <X className="h-5 w-5" />
+        </button>
       </div>
 
       {/* Tabs */}

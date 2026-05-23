@@ -180,6 +180,7 @@ type AppAction =
   | { type: 'CLEAR_TYPING'; payload: { conversationId: string; userId: string } }
   | { type: 'UPDATE_USER'; payload: User }
   | { type: 'CREATE_USER'; payload: User }
+  | { type: 'DELETE_USER'; payload: string }
   | { type: 'DEACTIVATE_USER'; payload: string }
   | { type: 'REACTIVATE_USER'; payload: string }
   | { type: 'CREATE_GROUP'; payload: Group }
@@ -397,6 +398,8 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
       // Deduplicate — socket event and modal dispatch can both fire for the same user
       if (state.users.some(u => u.id === action.payload.id)) return state;
       return { ...state, users: [...state.users, action.payload] };
+    case 'DELETE_USER':
+      return { ...state, users: state.users.filter(u => u.id !== action.payload) };
     case 'DEACTIVATE_USER':
       return {
         ...state,

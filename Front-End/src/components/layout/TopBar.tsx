@@ -4,13 +4,12 @@
 import React, { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppContext } from '@/context/AppContext';
-import { Bell, Search, UserPlus, X, MessageSquare, AtSign, UserPlus2, ShieldAlert, VolumeX, Menu } from 'lucide-react';
+import { Bell, Search, UserPlus, X, MessageSquare, AtSign, UserPlus2, ShieldAlert, VolumeX } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Avatar } from '../ui/avatar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { format, isToday } from 'date-fns';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { markAllNotificationsRead, markNotificationRead } from '@/services/notifications';
 
 const NotificationRow: React.FC<{ notification: any; onClick: () => void }> = ({ notification, onClick }) => {
@@ -79,7 +78,7 @@ const NotificationRow: React.FC<{ notification: any; onClick: () => void }> = ({
   );
 };
 
-const TopBar: React.FC<{ onCreateUser: () => void; onMenuToggle?: () => void }> = ({ onCreateUser, onMenuToggle }) => {
+const TopBar: React.FC<{ onCreateUser: () => void }> = ({ onCreateUser }) => {
   const { state, dispatch } = useAppContext();
   
   const myNotifications = useMemo(() =>
@@ -137,15 +136,6 @@ const TopBar: React.FC<{ onCreateUser: () => void; onMenuToggle?: () => void }> 
 
   return (
     <div className="h-14 border-b bg-card text-card-foreground flex items-center justify-between px-3 md:px-6 shrink-0 relative z-50 shadow-sm gap-2">
-      {/* Hamburger — mobile only, shows conversation list */}
-      <button
-        className="md:hidden p-2 hover:bg-muted rounded-full text-muted-foreground shrink-0"
-        onClick={onMenuToggle}
-        aria-label="Open conversations"
-      >
-        <Menu className="h-5 w-5" />
-      </button>
-
       <div className="flex-1 max-w-2xl relative mx-auto group">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
@@ -243,7 +233,7 @@ const TopBar: React.FC<{ onCreateUser: () => void; onMenuToggle?: () => void }> 
               {unreadCount > 0 && <Badge className="absolute -top-1 -right-1 h-5 min-w-[20px] px-1 bg-secondary text-white text-[10px] font-bold flex items-center justify-center border-2 border-card animate-in zoom-in">{unreadCount}</Badge>}
             </button>
           </PopoverTrigger>
-          <PopoverContent className="w-[360px] p-0 rounded-2xl overflow-hidden bg-card border border-border shadow-2xl z-[var(--z-toast)]" align="end">
+          <PopoverContent className="w-[min(360px,calc(100vw-16px))] p-0 rounded-2xl overflow-hidden bg-card border border-border shadow-2xl z-[var(--z-toast)]" align="end">
             <div className="p-4 border-b flex justify-between items-center bg-card/50">
               <h3 className="font-bold text-sm uppercase tracking-widest">Inbox</h3>
               <button
@@ -254,7 +244,7 @@ const TopBar: React.FC<{ onCreateUser: () => void; onMenuToggle?: () => void }> 
                 }}
               >Mark all as read</button>
             </div>
-            <ScrollArea className="max-h-[480px]">
+            <div className="max-h-[60vh] md:max-h-[400px] overflow-y-auto scroll-smooth scrollbar-thin">
               {myNotifications.length === 0 ? (
                 <div className="text-center py-20 opacity-30 flex flex-col items-center">
                   <Bell className="h-10 w-10 mb-2" />
@@ -263,7 +253,7 @@ const TopBar: React.FC<{ onCreateUser: () => void; onMenuToggle?: () => void }> 
               ) : (
                 myNotifications.map(n => <NotificationRow key={n.id} notification={n} onClick={() => handleNotificationClick(n)} />)
               )}
-            </ScrollArea>
+            </div>
           </PopoverContent>
         </Popover>
       </div>

@@ -40,7 +40,7 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, children, title, maxWidt
 
   return (
     <div
-      className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center overflow-hidden"
+      className="fixed inset-0 z-[var(--z-modal)] flex items-end md:items-center justify-center overflow-hidden"
       style={{ pointerEvents: 'auto' }}
     >
       {/* Backdrop */}
@@ -51,26 +51,29 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, children, title, maxWidt
       />
 
       {/*
-        Mobile   : full-screen (inset-x-0 bottom-0, rounded top corners, slides up)
-        Desktop  : centered card with maxWidth
+        Mobile  (<768px) : bottom sheet — full width, slides up, rounded top
+        Tablet  (768px+) : centered card — 90% wide, max 600px
+        Desktop (1024px+): centered card — auto width capped by maxWidth prop
       */}
       <div
         className={cn(
           // base
           'relative z-[51] bg-card text-card-foreground shadow-2xl w-full flex flex-col',
-          // mobile — full-screen, slide up
-          'rounded-t-2xl sm:rounded-2xl',
-          'animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-300',
-          'max-h-[95dvh] sm:max-h-[90vh]',
-          // desktop — centered card
-          `sm:${maxWidth}`,
+          // mobile: bottom sheet
+          'rounded-t-2xl md:rounded-2xl',
+          'animate-in slide-in-from-bottom-4 md:zoom-in-95 duration-300',
+          'max-h-[95dvh] md:max-h-[90vh]',
+          // tablet (768px–1023px): centered, 90% wide, capped at 600px
+          'md:w-[90%] md:max-w-[600px]',
+          // desktop (1024px+): auto width, maxWidth prop takes over
+          `lg:w-auto lg:${maxWidth}`,
         )}
         onClick={(e) => e.stopPropagation()}
       >
         {(title || onClose) && (
           <div className="flex items-center justify-between px-5 pt-5 pb-2 shrink-0">
             {/* Drag handle — mobile only */}
-            <div className="absolute top-2 left-1/2 -translate-x-1/2 h-1 w-10 rounded-full bg-muted-foreground/30 sm:hidden" />
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 h-1 w-10 rounded-full bg-muted-foreground/30 md:hidden" />
             {title && <h2 className="text-xl font-bold font-headline">{title}</h2>}
             <button
               onClick={onClose}

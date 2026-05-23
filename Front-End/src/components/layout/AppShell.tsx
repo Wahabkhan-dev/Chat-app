@@ -170,7 +170,6 @@ const AppShell: React.FC = () => {
       >
         <TopBar
           onCreateUser={() => dispatch({ type: 'OPEN_MODAL', payload: { type: 'createUser' } })}
-          onMenuToggle={() => setMobileSidebarOpen(true)}
         />
 
         {/* View content — shrinks above mobile bottom nav */}
