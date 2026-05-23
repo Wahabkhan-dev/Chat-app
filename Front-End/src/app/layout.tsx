@@ -5,6 +5,7 @@ import { AppProvider } from '@/context/AppContext';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { SessionExpiryWarning } from '@/components/SessionExpiryWarning';
+import { PwaInit } from '@/components/PwaInit';
 
 export const metadata: Metadata = {
   title: 'Mawby Teams Chat | Internal Communication',
@@ -27,6 +28,13 @@ export default function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
         <link rel="icon" href="/fav-1.webp" type="image/webp" />
         <link rel="shortcut icon" href="/fav-1.webp" />
+        {/* PWA */}
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="theme-color" content="#fb6a2c" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <meta name="apple-mobile-web-app-title" content="Mawby Teams" />
+        <link rel="apple-touch-icon" href="/icon-192.svg" />
       </head>
       <body className="font-body antialiased bg-background overflow-hidden h-full w-full">
         <AppProvider>
@@ -34,6 +42,7 @@ export default function RootLayout({
             {children}
             <Toaster />
             <SessionExpiryWarning />
+            <PwaInit />
           </TooltipProvider>
         </AppProvider>
       </body>
