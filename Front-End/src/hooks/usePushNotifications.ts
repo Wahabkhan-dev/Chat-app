@@ -24,31 +24,50 @@ export function usePushNotifications() {
 
     const subscribe = async () => {
       try {
-        const permission = await Notification.requestPermission();
+        // If permission was never asked, ask once. If already granted/denied, read it without prompting.
+        const permission = Notification.permission === 'default'
+          ? await Notification.requestPermission()
+          : Notification.permission;
+
         if (permission !== 'granted') {
-          console.warn('[push] notification permission denied');
+          console.warn('[push] notification permission not granted:', permission);
           return;
         }
 
         const registration = await navigator.serviceWorker.ready;
-
         let subscription = await registration.pushManager.getSubscription();
 
+        if (subscription) {
+          // Check if the subscription has an expiry and whether it has passed
+          const isExpired =
+            subscription.expirationTime !== null &&
+            subscription.expirationTime !== undefined &&
+            subscription.expirationTime < Date.now();
+
+          if (isExpired) {
+            console.log('[push] existing subscription is expired — unsubscribing and creating fresh one');
+            await subscription.unsubscribe();
+            subscription = null;
+          } else {
+            console.log('[push] valid subscription exists on this device — re-registering with backend');
+          }
+        } else {
+          console.log('[push] no subscription on this device — creating new one');
+        }
+
         if (!subscription) {
-          console.log('[push] no existing subscription, creating new one');
           subscription = await registration.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: urlBase64ToUint8Array(vapidKey),
           });
-        } else {
-          console.log('[push] existing browser subscription found, re-sending to backend');
+          console.log('[push] new subscription created:', subscription.endpoint.slice(0, 80));
         }
 
         const serialized = subscription.toJSON();
-        console.log('[push] sending subscription to backend:', serialized.endpoint);
+        console.log('[push] registering this device with backend:', serialized.endpoint?.slice(0, 80));
 
         const result = await api.post<{ success: boolean }>('/push/subscribe', { subscription: serialized });
-        console.log('[push] backend save result:', result);
+        console.log('[push] backend registration result:', result);
       } catch (err) {
         console.warn('[push] subscription setup failed:', err);
       }

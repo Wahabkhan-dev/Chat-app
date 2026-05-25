@@ -14,23 +14,26 @@ async function sendPushToUser(userId, payload) {
       [userId]
     );
 
-    console.log(`[push] user ${userId} has ${subs.length} subscription(s) in DB`);
-    if (!subs.length) return;
+    const total = subs.length;
+    console.log(`[push] user ${userId} has ${total} device(s) registered — sending to all simultaneously`);
+    if (!total) return;
 
     await Promise.allSettled(
-      subs.map(async (sub) => {
+      subs.map(async (sub, index) => {
+        const device = `device ${index + 1}/${total} (sub_id=${sub.id})`;
         const subscription = {
           endpoint: sub.endpoint,
           keys: { p256dh: sub.p256dh, auth: sub.auth },
         };
+        console.log(`[push] → ${device} user=${userId} endpoint=${sub.endpoint.slice(0, 70)}...`);
         try {
           await webpush.sendNotification(subscription, JSON.stringify(payload));
-          console.log(`[push] notification sent to user ${userId} via ${sub.endpoint.slice(0, 60)}...`);
+          console.log(`[push] ✓ delivered — ${device} user=${userId}`);
         } catch (err) {
-          console.warn(`[push] webpush error for user ${userId} — status=${err.statusCode} msg=${err.message}`);
+          console.warn(`[push] ✗ failed — ${device} user=${userId} status=${err.statusCode} msg=${err.message}`);
           if (err.statusCode === 410 || err.statusCode === 404) {
             await pool.query('DELETE FROM push_subscriptions WHERE id = ?', [sub.id]);
-            console.log(`[push] removed expired subscription id=${sub.id} for user ${userId}`);
+            console.log(`[push] removed expired sub — ${device} user=${userId}`);
           }
         }
       })
