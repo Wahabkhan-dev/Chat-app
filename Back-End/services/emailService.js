@@ -1,20 +1,7 @@
-const nodemailer = require('nodemailer');
-
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: 587,
-  secure: false,
-  family: 4,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+const { Resend } = require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendOTPEmail(email, otp, userName) {
-  const fromName = process.env.SMTP_FROM_NAME || 'Mawby Teams';
-  const fromAddr = process.env.SMTP_USER;
-
   const html = `
 <!DOCTYPE html>
 <html lang="en">
@@ -82,8 +69,8 @@ async function sendOTPEmail(email, otp, userName) {
 </html>
 `;
 
-  await transporter.sendMail({
-    from: `"${fromName}" <${fromAddr}>`,
+  await resend.emails.send({
+    from: 'Mawby Teams <onboarding@resend.dev>',
     to: email,
     subject: 'Your Mawby Teams Login Code',
     html,
