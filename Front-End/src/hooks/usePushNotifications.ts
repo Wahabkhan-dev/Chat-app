@@ -92,15 +92,28 @@ export function usePushNotifications() {
         }
       }
 
-      // Serialize and save to backend
+      // Serialize
       const serialized = subscription.toJSON();
       console.log('[push:17] serialized subscription — endpoint:', serialized.endpoint?.slice(0, 80));
       console.log('[push:18] keys present — p256dh:', !!serialized.keys?.p256dh, '| auth:', !!serialized.keys?.auth);
+
+      // Skip backend POST if this exact endpoint is already confirmed registered for this user.
+      // Cache key is per-user so switching accounts on the same device still registers correctly.
+      const cacheKey = `push_ep_${authRef.current.userId}`;
+      const cachedEndpoint = localStorage.getItem(cacheKey);
+      if (cachedEndpoint && cachedEndpoint === serialized.endpoint) {
+        console.log('[push:19] endpoint already registered for this user — skipping backend POST');
+        return;
+      }
 
       console.log('[push:19] posting to backend /push/subscribe...');
       try {
         const result = await api.post<{ success: boolean }>('/push/subscribe', { subscription: serialized });
         console.log('[push:20] backend responded:', JSON.stringify(result));
+        // Cache only after confirmed success so a failed POST is retried next time
+        if ((result as any)?.success) {
+          localStorage.setItem(cacheKey, serialized.endpoint ?? '');
+        }
       } catch (apiErr: any) {
         console.error('[push:ERR] backend POST failed:', apiErr?.message, '| full error:', apiErr);
         throw apiErr;
