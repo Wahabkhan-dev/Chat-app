@@ -1,17 +1,11 @@
 import { io, Socket } from 'socket.io-client';
 import { getToken, saveToken } from '@/lib/api';
 
-const SOCKET_URL = process.env.NEXT_PUBLIC_API_URL
-  ? process.env.NEXT_PUBLIC_API_URL.replace(/\/api\/?$/, '')
-  : typeof window !== 'undefined'
-    ? (() => {
-      const origin = window.location.origin;
-      if (origin.includes('localhost') && !origin.includes(':3001')) {
-        return 'http://localhost:3001';
-      }
-      return origin;
-    })()
-    : 'http://localhost:3001';
+const _rawSocketApiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+const _validApiUrl = _rawSocketApiUrl.startsWith('http')
+  ? _rawSocketApiUrl
+  : 'https://chat-app-wv5a.onrender.com/api';
+const SOCKET_URL = _validApiUrl.replace(/\/api\/?$/, '');
 
 let socket: Socket | null = null;
 

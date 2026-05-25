@@ -1,6 +1,7 @@
-const BASE_URL = typeof window !== 'undefined'
-  ? (process.env.NEXT_PUBLIC_API_URL || `${window.location.origin}/api`)
-  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api');
+const _rawUploadApiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+const BASE_URL = _rawUploadApiUrl.startsWith('http')
+  ? _rawUploadApiUrl
+  : 'https://chat-app-wv5a.onrender.com/api';
 
 export interface UploadedFileResult {
   key: string;       // R2 storage key — store this in the message; never a direct URL

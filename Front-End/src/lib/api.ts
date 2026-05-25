@@ -1,4 +1,7 @@
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+const _rawApiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+const BASE_URL = _rawApiUrl.startsWith('http')
+  ? _rawApiUrl
+  : 'https://chat-app-wv5a.onrender.com/api';
 
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null;

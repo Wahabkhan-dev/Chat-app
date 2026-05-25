@@ -4,9 +4,10 @@
  * still valid when the browser actually fetches the file.
  */
 
-const BASE_URL = typeof window !== 'undefined'
-  ? (process.env.NEXT_PUBLIC_API_URL || `${window.location.origin}/api`)
-  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api');
+const _rawFileApiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+const BASE_URL = _rawFileApiUrl.startsWith('http')
+  ? _rawFileApiUrl
+  : 'https://chat-app-wv5a.onrender.com/api';
 const EVICT_BUFFER_MS = 30_000; // evict 30 s before expiry
 
 interface CacheEntry {
