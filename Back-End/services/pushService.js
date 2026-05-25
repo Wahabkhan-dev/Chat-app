@@ -14,6 +14,7 @@ async function sendPushToUser(userId, payload) {
       [userId]
     );
 
+    console.log(`[push] user ${userId} has ${subs.length} subscription(s) in DB`);
     if (!subs.length) return;
 
     await Promise.allSettled(
@@ -24,10 +25,12 @@ async function sendPushToUser(userId, payload) {
         };
         try {
           await webpush.sendNotification(subscription, JSON.stringify(payload));
+          console.log(`[push] notification sent to user ${userId} via ${sub.endpoint.slice(0, 60)}...`);
         } catch (err) {
-          // 410 Gone = subscription expired, remove it
+          console.warn(`[push] webpush error for user ${userId} — status=${err.statusCode} msg=${err.message}`);
           if (err.statusCode === 410 || err.statusCode === 404) {
             await pool.query('DELETE FROM push_subscriptions WHERE id = ?', [sub.id]);
+            console.log(`[push] removed expired subscription id=${sub.id} for user ${userId}`);
           }
         }
       })

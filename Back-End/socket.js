@@ -265,6 +265,8 @@ function setupSocket(io, optimizationService) {
         socket.to(conversationId).emit('new_message', { conversationId, message });
 
         // Persist a message notification for recipients so it survives refresh/relogin.
+        // Declared outside the try block so the push block below can access it.
+        let notifyRecipients = [];
         try {
           const [senderRows] = await pool.query('SELECT name FROM users WHERE id = ? AND is_active = 1', [userId]);
           const senderName = senderRows[0]?.name || 'Someone';
@@ -276,7 +278,6 @@ function setupSocket(io, optimizationService) {
             notificationTitle = `${senderName} in ${groupRow?.name || 'Group'}`;
           }
 
-          const notifyRecipients = [];
           if (conversationId.startsWith('dm_')) {
             const parts = conversationId.split('_');
             const otherId = String(parts[1]) === String(userId) ? parts[2] : parts[1];
@@ -331,29 +332,36 @@ function setupSocket(io, optimizationService) {
         // Push notifications — fire-and-forget, never blocks message delivery
         try {
           const { sendPushToUser } = require('./services/pushService');
-          const pushBody = (message.content || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1').slice(0, 100) || '📎 Attachment';
-          const pushTitle = await (async () => {
+          console.log(`[push] message saved — attempting push to ${notifyRecipients.length} recipient(s): [${notifyRecipients.join(', ')}]`);
+          if (notifyRecipients.length > 0) {
+            const pushBody = (message.content || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1').slice(0, 100) || '📎 Attachment';
             const [sRows] = await pool.query('SELECT name FROM users WHERE id = ? AND is_active = 1', [userId]);
             const sName = sRows[0]?.name || 'Someone';
+            let pushTitle = sName;
             if (!conversationId.startsWith('dm_')) {
               const [[gRow]] = await pool.query('SELECT name FROM `groups` WHERE id = ?', [conversationId]);
-              return `${sName} in ${gRow?.name || 'Group'}`;
+              pushTitle = `${sName} in ${gRow?.name || 'Group'}`;
             }
-            return sName;
-          })();
-          const pushPayload = {
-            title: pushTitle,
-            body: pushBody,
-            icon: '/icon-192.svg',
-            badge: '/icon-192.svg',
-            conversationId,
-            conversationType: conversationId.startsWith('dm_') ? 'dm' : 'group',
-            url: '/',
-          };
-          for (const recipientId of notifyRecipients) {
-            sendPushToUser(recipientId, pushPayload).catch(() => {});
+            const pushPayload = {
+              title: pushTitle,
+              body: pushBody,
+              icon: '/icon-192.svg',
+              badge: '/icon-192.svg',
+              conversationId,
+              conversationType: conversationId.startsWith('dm_') ? 'dm' : 'group',
+              url: '/',
+            };
+            console.log(`[push] payload — title="${pushTitle}" body="${pushBody.slice(0, 60)}"`);
+            for (const recipientId of notifyRecipients) {
+              console.log(`[push] dispatching to user ${recipientId}`);
+              sendPushToUser(recipientId, pushPayload).catch((err) => {
+                console.warn(`[push] dispatch failed for user ${recipientId}:`, err.message);
+              });
+            }
           }
-        } catch { /* never block message delivery */ }
+        } catch (pushErr) {
+          console.error('[push] error (message still delivered):', pushErr.message);
+        }
 
         // For DMs, only send a personal-room fallback when the recipient is not currently in the DM room.
         if (conversationId.startsWith('dm_')) {
