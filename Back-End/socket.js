@@ -328,6 +328,33 @@ function setupSocket(io, optimizationService) {
           console.error('[send_message] notification error:', noteErr);
         }
 
+        // Push notifications — fire-and-forget, never blocks message delivery
+        try {
+          const { sendPushToUser } = require('./services/pushService');
+          const pushBody = (message.content || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1').slice(0, 100) || '📎 Attachment';
+          const pushTitle = await (async () => {
+            const [sRows] = await pool.query('SELECT name FROM users WHERE id = ? AND is_active = 1', [userId]);
+            const sName = sRows[0]?.name || 'Someone';
+            if (!conversationId.startsWith('dm_')) {
+              const [[gRow]] = await pool.query('SELECT name FROM `groups` WHERE id = ?', [conversationId]);
+              return `${sName} in ${gRow?.name || 'Group'}`;
+            }
+            return sName;
+          })();
+          const pushPayload = {
+            title: pushTitle,
+            body: pushBody,
+            icon: '/icon-192.svg',
+            badge: '/icon-192.svg',
+            conversationId,
+            conversationType: conversationId.startsWith('dm_') ? 'dm' : 'group',
+            url: '/',
+          };
+          for (const recipientId of notifyRecipients) {
+            sendPushToUser(recipientId, pushPayload).catch(() => {});
+          }
+        } catch { /* never block message delivery */ }
+
         // For DMs, only send a personal-room fallback when the recipient is not currently in the DM room.
         if (conversationId.startsWith('dm_')) {
           const parts = conversationId.split('_');

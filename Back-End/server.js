@@ -26,6 +26,7 @@ const sessionsRoutes = require('./routes/sessions');
 const messageReadsRoutes = require('./routes/messageReads');
 const fileMetadataRoutes = require('./routes/fileMetadata');
 const conversationMetadataRoutes = require('./routes/conversationMetadata');
+const pushRoutes = require('./routes/push');
 const { setupSocket } = require('./socket');
 const { cleanupExpiredData } = require('./services/sessionService');
 const { errorHandler } = require('./middleware/errorHandler');
@@ -124,6 +125,7 @@ app.use('/api/sessions', sessionsRoutes);
 app.use('/api/message-reads', messageReadsRoutes);
 app.use('/api/file-metadata', fileMetadataRoutes);
 app.use('/api/conversation-metadata', conversationMetadataRoutes);
+app.use('/api/push', pushRoutes);
 
 // Health check with optimization stats
 app.get('/api/health', (req, res) => {
@@ -277,6 +279,19 @@ async function addIndexIfMissing(table, indexName, definition) {
       // MySQL TIMESTAMP ceiling of 2038-01-19. DATETIME supports up to year 9999.
       async () => pool.query(`ALTER TABLE user_sessions MODIFY COLUMN expires_at DATETIME NOT NULL`),
       async () => pool.query(`ALTER TABLE token_blacklist MODIFY COLUMN expires_at DATETIME NOT NULL`),
+      // Create push_subscriptions table for web push notifications
+      async () => pool.query(`CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        endpoint TEXT NOT NULL,
+        p256dh VARCHAR(255) NOT NULL,
+        auth VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_endpoint (endpoint(500)),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_push_user_id (user_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`),
       // Create login_otps table for OTP-based email verification
       async () => pool.query(`CREATE TABLE IF NOT EXISTS login_otps (
         id INT AUTO_INCREMENT PRIMARY KEY,

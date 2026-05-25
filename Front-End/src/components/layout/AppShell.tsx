@@ -12,6 +12,7 @@ import SettingsPage from '../settings/SettingsPage';
 import { useAppContext } from '@/context/AppContext';
 import { useSocket } from '@/hooks/useSocket';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
 import MessageNotificationToast from '../chat/MessageNotificationToast';
 import { MessageSquare, FileText, Shield, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -39,6 +40,7 @@ const AppShell: React.FC = () => {
 
   useSocket();
   useNotificationPermission();
+  usePushNotifications();
 
   // When a conversation is selected on mobile, slide into chat view
   useEffect(() => {
