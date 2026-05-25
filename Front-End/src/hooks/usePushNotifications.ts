@@ -23,53 +23,89 @@ export function usePushNotifications() {
     if (!vapidKey) return;
 
     const subscribe = async () => {
+      console.log('[push:1] subscribe() started — user:', state.currentUser?.id, 'platform:', navigator.userAgent.slice(0, 80));
+
+      // STEP 1 — environment checks
+      console.log('[push:2] environment check — serviceWorker:', 'serviceWorker' in navigator, '| PushManager:', 'PushManager' in window, '| Notification API:', 'Notification' in window);
+      console.log('[push:3] VAPID key present:', !!vapidKey, '| key prefix:', vapidKey?.slice(0, 20));
+
       try {
-        // If permission was never asked, ask once. If already granted/denied, read it without prompting.
-        const permission = Notification.permission === 'default'
-          ? await Notification.requestPermission()
-          : Notification.permission;
+        // STEP 2 — permission
+        console.log('[push:4] current Notification.permission:', Notification.permission);
+        let permission: NotificationPermission;
+        if (Notification.permission === 'default') {
+          console.log('[push:5] permission not yet asked — requesting now');
+          permission = await Notification.requestPermission();
+          console.log('[push:6] requestPermission() returned:', permission);
+        } else {
+          permission = Notification.permission;
+          console.log('[push:5] permission already set, skipping prompt:', permission);
+        }
 
         if (permission !== 'granted') {
-          console.warn('[push] notification permission not granted:', permission);
+          console.warn('[push:ERR] permission not granted — aborting. value:', permission);
           return;
         }
+        console.log('[push:7] permission granted — continuing');
 
+        // STEP 3 — service worker
+        console.log('[push:8] waiting for serviceWorker.ready...');
         const registration = await navigator.serviceWorker.ready;
+        console.log('[push:9] service worker ready — scope:', registration.scope, '| state:', registration.active?.state);
+
+        // STEP 4 — existing subscription check
+        console.log('[push:10] calling pushManager.getSubscription()...');
         let subscription = await registration.pushManager.getSubscription();
+        console.log('[push:11] existing subscription:', subscription ? subscription.endpoint.slice(0, 80) : 'none');
 
         if (subscription) {
-          // Check if the subscription has an expiry and whether it has passed
-          const isExpired =
-            subscription.expirationTime !== null &&
-            subscription.expirationTime !== undefined &&
-            subscription.expirationTime < Date.now();
-
+          const exp = subscription.expirationTime;
+          console.log('[push:12] expirationTime:', exp, '| now:', Date.now(), '| expired:', exp !== null && exp !== undefined && exp < Date.now());
+          const isExpired = exp !== null && exp !== undefined && exp < Date.now();
           if (isExpired) {
-            console.log('[push] existing subscription is expired — unsubscribing and creating fresh one');
-            await subscription.unsubscribe();
+            console.log('[push:13] subscription expired — unsubscribing');
+            const ok = await subscription.unsubscribe();
+            console.log('[push:14] unsubscribe() result:', ok);
             subscription = null;
           } else {
-            console.log('[push] valid subscription exists on this device — re-registering with backend');
+            console.log('[push:13] subscription is valid — will re-register with backend');
           }
-        } else {
-          console.log('[push] no subscription on this device — creating new one');
         }
 
+        // STEP 5 — create subscription if needed
         if (!subscription) {
-          subscription = await registration.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(vapidKey),
-          });
-          console.log('[push] new subscription created:', subscription.endpoint.slice(0, 80));
+          console.log('[push:15] calling pushManager.subscribe()...');
+          try {
+            subscription = await registration.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: urlBase64ToUint8Array(vapidKey),
+            });
+            console.log('[push:16] subscribe() succeeded — endpoint:', subscription.endpoint.slice(0, 80));
+          } catch (subErr: any) {
+            console.error('[push:ERR] pushManager.subscribe() threw:', subErr?.name, subErr?.message);
+            throw subErr;
+          }
         }
 
+        // STEP 6 — serialize
         const serialized = subscription.toJSON();
-        console.log('[push] registering this device with backend:', serialized.endpoint?.slice(0, 80));
+        console.log('[push:17] serialized subscription — endpoint:', serialized.endpoint?.slice(0, 80));
+        console.log('[push:18] keys present — p256dh:', !!serialized.keys?.p256dh, '| auth:', !!serialized.keys?.auth);
 
-        const result = await api.post<{ success: boolean }>('/push/subscribe', { subscription: serialized });
-        console.log('[push] backend registration result:', result);
-      } catch (err) {
-        console.warn('[push] subscription setup failed:', err);
+        // STEP 7 — send to backend
+        console.log('[push:19] posting to backend /push/subscribe...');
+        try {
+          const result = await api.post<{ success: boolean }>('/push/subscribe', { subscription: serialized });
+          console.log('[push:20] backend responded:', JSON.stringify(result));
+        } catch (apiErr: any) {
+          console.error('[push:ERR] backend POST failed:', apiErr?.message, '| full error:', apiErr);
+          throw apiErr;
+        }
+
+        console.log('[push:DONE] subscription registered successfully on this device');
+      } catch (err: any) {
+        console.error('[push:FATAL] subscribe() failed at step above —', err?.name, ':', err?.message);
+        console.error('[push:FATAL] full error object:', err);
       }
     };
 
