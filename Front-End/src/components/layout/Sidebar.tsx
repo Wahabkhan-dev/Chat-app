@@ -21,6 +21,7 @@ import { getSocket } from '@/services/socket';
 import { logoutUser } from '@/services/auth';
 import { setConversationBlockStatus, emitConversationMetadataChanged } from '@/services/conversationMetadata';
 import { useSignedUrl } from '@/hooks/useSignedUrl';
+import NotificationBell from './NotificationBell';
 
 function getDmConvId(id1: string | undefined, id2: string) {
   const a = Number(id1 || 0);
@@ -307,6 +308,7 @@ const Sidebar: React.FC<{
             <span className="font-bold text-sm font-headline truncate tracking-tight">Mawby Teams</span>
             {state.currentUser?.role === 'admin' && <Badge variant="default" className="w-fit text-[9px] h-3.5 bg-primary px-1 font-bold rounded-sm mt-0.5">WORKSPACE ADMIN</Badge>}
           </div>
+          <NotificationBell className="ml-auto shrink-0" />
         </div>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60" />

@@ -7,6 +7,7 @@ import { useAppContext } from '@/context/AppContext';
 import { api } from '@/lib/api';
 import { getSocket } from '@/services/socket';
 import { Search, Info, X, ChevronDown, VolumeX, Lock, Pin, ArrowLeft } from 'lucide-react';
+import NotificationBell from '@/components/layout/NotificationBell';
 import { Avatar } from '../ui/avatar';
 import MessageBubble from './MessageBubble';
 import { Message } from '@/mock/messages';
@@ -278,6 +279,8 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
           </div>
         </div>
         <div className="flex items-center gap-0 md:gap-1 shrink-0">
+          {/* Bell — mobile only; desktop uses the TopBar bell */}
+          <NotificationBell className="md:hidden h-9 w-9 p-2 flex items-center justify-center border-transparent hover:border-transparent" />
           <button
             onClick={() => dispatch({ type: 'SET_CHAT_SEARCH', payload: { active: !state.chatUI.isSearchActive, query: '' } })}
             className={cn('p-2 rounded-full transition-all h-9 w-9 flex items-center justify-center', state.chatUI.isSearchActive ? 'bg-muted text-primary' : 'hover:bg-muted text-muted-foreground')}
