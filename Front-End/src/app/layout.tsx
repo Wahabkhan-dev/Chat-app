@@ -23,6 +23,15 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full">
       <head>
+        {/* TEMP: Eruda mobile console — remove when done debugging */}
+        <script dangerouslySetInnerHTML={{ __html: `
+          if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
+            var s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/eruda';
+            s.onload = function() { eruda.init(); };
+            document.head.appendChild(s);
+          }
+        ` }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
