@@ -9,7 +9,10 @@ router.post('/subscribe', authenticateToken, async (req, res) => {
   const { subscription } = req.body;
   const userId = req.user.id;
 
+  console.log(`[push] subscribe called for user ${userId}, endpoint: ${subscription?.endpoint?.slice(0, 60)}...`);
+
   if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
+    console.warn('[push] invalid subscription payload:', JSON.stringify(subscription));
     return res.status(400).json({ message: 'Invalid subscription.' });
   }
 
@@ -24,6 +27,7 @@ router.post('/subscribe', authenticateToken, async (req, res) => {
          updated_at = NOW()`,
       [userId, subscription.endpoint, subscription.keys.p256dh, subscription.keys.auth]
     );
+    console.log(`[push] subscription saved for user ${userId}`);
     res.json({ success: true });
   } catch (err) {
     console.error('[push] subscribe error:', err);

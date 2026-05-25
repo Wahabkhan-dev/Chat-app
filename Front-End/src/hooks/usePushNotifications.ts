@@ -25,20 +25,30 @@ export function usePushNotifications() {
     const subscribe = async () => {
       try {
         const permission = await Notification.requestPermission();
-        if (permission !== 'granted') return;
+        if (permission !== 'granted') {
+          console.warn('[push] notification permission denied');
+          return;
+        }
 
         const registration = await navigator.serviceWorker.ready;
 
         let subscription = await registration.pushManager.getSubscription();
 
         if (!subscription) {
+          console.log('[push] no existing subscription, creating new one');
           subscription = await registration.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: urlBase64ToUint8Array(vapidKey),
           });
+        } else {
+          console.log('[push] existing browser subscription found, re-sending to backend');
         }
 
-        await api.post('/push/subscribe', { subscription });
+        const serialized = subscription.toJSON();
+        console.log('[push] sending subscription to backend:', serialized.endpoint);
+
+        const result = await api.post<{ success: boolean }>('/push/subscribe', { subscription: serialized });
+        console.log('[push] backend save result:', result);
       } catch (err) {
         console.warn('[push] subscription setup failed:', err);
       }
