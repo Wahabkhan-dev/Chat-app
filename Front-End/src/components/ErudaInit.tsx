@@ -29,15 +29,7 @@ import { useEffect } from 'react';
 
 export function ErudaInit() {
   useEffect(() => {
-    // Persist the flag if ?debug=true is in the URL
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('debug') === 'true') {
-      localStorage.setItem('eruda', 'true');
-    }
-
-    if (localStorage.getItem('eruda') !== 'true') return;
-
-    // Inject Eruda from CDN — zero impact on bundle
+    // Inject Eruda from CDN — always active for testing
     const script = document.createElement('script');
     script.src = 'https://cdn.jsdelivr.net/npm/eruda';
     script.onload = () => {
