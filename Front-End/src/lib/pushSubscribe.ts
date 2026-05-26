@@ -46,6 +46,10 @@ export async function subscribePushDevice(
 ): Promise<boolean> {
   try {
     if (typeof window === 'undefined') return false;
+    if (!window.isSecureContext) {
+      console.warn('[push] secure context required for push notifications');
+      return false;
+    }
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
       console.warn('[push] PushManager not available on this device');
       return false;

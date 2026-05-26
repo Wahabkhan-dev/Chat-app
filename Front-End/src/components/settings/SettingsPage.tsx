@@ -86,6 +86,15 @@ const SettingsPage: React.FC = () => {
         return;
       }
 
+      if (!window.isSecureContext) {
+        toast({
+          title: 'Secure connection required',
+          description: 'Push notifications require HTTPS or localhost. Open the app over HTTPS or use a secure tunnel and try again.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
       // Step 1 — Request permission
       console.log('[push] requesting notification permission...');
       const permission = await Notification.requestPermission();
@@ -159,6 +168,15 @@ const SettingsPage: React.FC = () => {
 
       const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
       if (!vapidKey) throw new Error('VAPID public key is missing.');
+
+      if (!window.isSecureContext) {
+        toast({
+          title: 'Secure connection required',
+          description: 'Push notifications require HTTPS or localhost. Open the app over HTTPS or use a secure tunnel and try again.',
+          variant: 'destructive',
+        });
+        return;
+      }
 
       console.log('[push:test] waiting for service worker...');
       const registration = await swReady();
@@ -422,9 +440,9 @@ const SettingsPage: React.FC = () => {
                         {isEnabling ? (
                           <><Loader2 className="h-4 w-4 animate-spin" />Enabling…</>
                         ) : pushStatus === 'subscribed' ? (
-                          <><CheckCircle2 className="h-4 w-4" />Notifications Enabled</>
+                          <><CheckCircle2 className="h-4 w-4" />Notificationss Enabled</>
                         ) : (
-                          <><Bell className="h-4 w-4" />Enable Notifications</>
+                          <><Bell className="h-4 w-4" />Enable Notificationss</>
                         )}
                       </Button>
                     )}
