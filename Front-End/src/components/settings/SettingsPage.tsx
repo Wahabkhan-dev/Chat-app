@@ -157,18 +157,18 @@ const SettingsPage: React.FC = () => {
         </div>
 
         <Tabs defaultValue="profile" className="space-y-4 md:space-y-6">
-          <TabsList className="bg-card border p-1 rounded-xl h-auto w-full md:w-auto">
-            <TabsTrigger value="profile" className="flex-1 md:flex-none gap-2 px-4 md:px-6 py-2 rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white transition-all font-bold text-xs uppercase tracking-widest">
-              <User className="h-4 w-4" />
-              <span>Profile</span>
+          <TabsList className="bg-card border p-1 rounded-xl h-auto w-full md:w-auto overflow-x-auto">
+            <TabsTrigger value="profile" className="flex-1 md:flex-none gap-2 px-3 md:px-6 py-2 rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white transition-all font-bold text-xs uppercase tracking-widest">
+              <User className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Profile</span>
             </TabsTrigger>
-            <TabsTrigger value="appearance" className="flex-1 md:flex-none gap-2 px-4 md:px-6 py-2 rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white transition-all font-bold text-xs uppercase tracking-widest">
-              <Palette className="h-4 w-4" />
-              <span>Appearance</span>
+            <TabsTrigger value="appearance" className="flex-1 md:flex-none gap-2 px-3 md:px-6 py-2 rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white transition-all font-bold text-xs uppercase tracking-widest">
+              <Palette className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Appearance</span>
             </TabsTrigger>
-            <TabsTrigger value="notifications" className="flex-1 md:flex-none gap-2 px-4 md:px-6 py-2 rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white transition-all font-bold text-xs uppercase tracking-widest">
-              <Bell className="h-4 w-4" />
-              <span>Notifications</span>
+            <TabsTrigger value="notifications" className="flex-1 md:flex-none gap-2 px-3 md:px-6 py-2 rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white transition-all font-bold text-xs uppercase tracking-widest">
+              <Bell className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Notifications</span>
             </TabsTrigger>
           </TabsList>
 
@@ -323,7 +323,7 @@ const SettingsPage: React.FC = () => {
                         onClick={pushStatus === 'idle' ? handleEnablePush : undefined}
                         disabled={isEnabling || pushStatus === 'subscribed'}
                         className={cn(
-                          'rounded-xl h-11 px-6 font-bold gap-2 transition-all',
+                          'rounded-xl h-11 px-6 font-bold gap-2 transition-all w-full sm:w-auto',
                           pushStatus === 'subscribed'
                             ? 'bg-green-600 hover:bg-green-600 text-white cursor-default'
                             : 'bg-primary hover:bg-primary/90 text-white shadow-lg shadow-primary/20'
@@ -344,7 +344,7 @@ const SettingsPage: React.FC = () => {
                         variant="outline"
                         onClick={handleTestPush}
                         disabled={isTesting}
-                        className="rounded-xl h-11 px-6 font-bold gap-2 border-border hover:bg-primary/5 hover:text-primary transition-all"
+                        className="rounded-xl h-11 px-6 font-bold gap-2 border-border hover:bg-primary/5 hover:text-primary transition-all w-full sm:w-auto"
                       >
                         {isTesting ? (
                           <><Loader2 className="h-4 w-4 animate-spin" />Sending…</>
