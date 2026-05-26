@@ -16,6 +16,7 @@ export function useSocket() {
   useEffect(() => { stateRef.current = state; });
   // Dedup processed message IDs — prevents double-delivery from room + personal room
   const processedMsgIds = useRef(new Set<string>());
+  const loadedOnce = useRef(false); // true after first loadData() completes
 
   useEffect(() => {
     if (!state.isAuthenticated || initialized.current) return;
@@ -24,6 +25,29 @@ export function useSocket() {
 
     initialized.current = true;
     const socket = connectSocket(token);
+
+    // Fetch unread counts for conversations that received messages while socket was down.
+    // Called both after initial load and on every reconnect so the sidebar badges stay accurate.
+    const syncMissedMessages = async () => {
+      try {
+        const uid = stateRef.current.currentUser?.id;
+        const stored = uid ? localStorage.getItem(`cmeta_${uid}`) : null;
+        if (!stored) return;
+        const savedMeta = JSON.parse(stored);
+        const toCheck = Object.entries(savedMeta)
+          .filter(([, m]: any) => m.lastReadAt)
+          .map(([id, m]: any) => ({ id, since: m.lastReadAt }));
+        if (toCheck.length === 0) return;
+        const { counts, previews } = await api.post<{
+          counts: Record<string, number>;
+          previews: Record<string, { senderId: string; content: string; type: string; timestamp: string }>;
+        }>('/messages/unread-since', { conversations: toCheck });
+        dispatch({ type: 'UPDATE_UNREAD_COUNTS', payload: { counts, previews } });
+        console.log('[Socket] missed-message sync done:', JSON.stringify(counts));
+      } catch (e) {
+        console.warn('[Socket] syncMissedMessages failed', e);
+      }
+    };
 
     // ── Load initial data ──────────────────────────────────────────────────
     const loadData = async () => {
@@ -180,6 +204,8 @@ export function useSocket() {
             }
           }
         } catch { /* best-effort */ }
+
+        loadedOnce.current = true; // initial load done — future connects are reconnects
       } catch (err) {
         console.error('Failed to load initial data:', err);
       }
@@ -199,6 +225,12 @@ export function useSocket() {
       s.groups
         .filter(g => !s.conversationMeta[g.id]?.leftAt)
         .forEach((group) => socket.emit('join_group', { groupId: group.id }));
+
+      // On reconnect (not the very first connect) pull any messages that arrived while offline
+      if (loadedOnce.current) {
+        console.log('[Socket] reconnected — syncing missed messages');
+        syncMissedMessages();
+      }
     });
 
     const isBlockedConversation = (conversationId?: string) => {
@@ -713,8 +745,34 @@ export function useSocket() {
       });
     });
 
+    // Heartbeat: mobile OS can suspend the socket when the app is backgrounded.
+    // Check every 30 s; if disconnected, kick Socket.IO's own reconnect loop.
+    const heartbeatTimer = setInterval(() => {
+      if (!getSocket()?.connected && stateRef.current.isAuthenticated) {
+        console.log('[Socket] heartbeat: not connected — reconnecting');
+        getSocket()?.connect();
+      }
+    }, 30_000);
+
+    // Foreground: when the user switches back to the app, reconnect immediately
+    // rather than waiting for the next heartbeat tick.
+    const handleVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      const sock = getSocket();
+      if (!sock?.connected && stateRef.current.isAuthenticated) {
+        console.log('[Socket] foregrounded — reconnecting');
+        sock?.connect();
+      } else if (sock?.connected && loadedOnce.current) {
+        // Connected but might have missed events while the tab was hidden
+        syncMissedMessages();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
       initialized.current = false;
+      clearInterval(heartbeatTimer);
+      document.removeEventListener('visibilitychange', handleVisibility);
       disconnectSocket();
     };
   }, [state.isAuthenticated, dispatch]);

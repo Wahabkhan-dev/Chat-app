@@ -15,6 +15,7 @@ import { useNotificationPermission } from '@/hooks/useNotificationPermission';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import MessageNotificationToast from '../chat/MessageNotificationToast';
 import PushPermissionBanner from '../PushPermissionBanner';
+import SocketStatusBanner from '../SocketStatusBanner';
 import { MessageSquare, FileText, Shield, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -245,6 +246,7 @@ const AppShell: React.FC = () => {
       <Toaster />
       <MessageNotificationToast />
       <PushPermissionBanner />
+      <SocketStatusBanner />
     </div>
   );
 };

@@ -40,7 +40,10 @@ export function isIOSPWAWithPushSupport(): boolean {
  *  - User is authenticated (userId provided)
  *  - Notification.permission === 'granted' (caller must have obtained permission first)
  */
-export async function subscribePushDevice(userId: string | number): Promise<boolean> {
+export async function subscribePushDevice(
+  userId: string | number,
+  options?: { bypassCache?: boolean }
+): Promise<boolean> {
   try {
     if (typeof window === 'undefined') return false;
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
@@ -100,11 +103,12 @@ export async function subscribePushDevice(userId: string | number): Promise<bool
       return false;
     }
 
-    // Skip backend POST if this exact endpoint is already confirmed for this user
+    // Skip backend POST if this exact endpoint is already confirmed for this user.
+    // bypassCache forces a POST regardless (used on login and app-load to guarantee DB row exists).
     const cacheKey = `push_ep_${userId}`;
     const cachedEndpoint = localStorage.getItem(cacheKey);
-    if (cachedEndpoint && cachedEndpoint === serialized.endpoint) {
-      console.log('[push:sub] endpoint already registered for this user — skipping backend POST');
+    if (!options?.bypassCache && cachedEndpoint && cachedEndpoint === serialized.endpoint) {
+      console.log('[push:sub] endpoint cached for this user — skipping backend POST');
       return true;
     }
 

@@ -15,16 +15,35 @@ interface ModalProps {
 
 const Modal: React.FC<ModalProps> = ({ isOpen, onClose, children, title, maxWidth = 'max-w-md' }) => {
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-      document.body.style.pointerEvents = 'auto';
-    } else {
-      document.body.style.overflow = '';
-      document.body.style.pointerEvents = '';
+    if (!isOpen) return;
+
+    // Capture scroll position before locking — on a fixed-height app this is usually 0,
+    // but iOS Safari can still have a non-zero scroll offset from address-bar bounce.
+    const scrollY = window.scrollY;
+
+    // Compensate scrollbar width so content width doesn't change (desktop).
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
     }
+
+    // position:fixed + top prevents iOS rubber-band scroll from shifting background content.
+    // overflow:hidden + left/right locks width so nothing reflows.
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.left = '0';
+    document.body.style.right = '0';
+    document.body.style.overflow = 'hidden';
+
     return () => {
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.left = '';
+      document.body.style.right = '';
       document.body.style.overflow = '';
-      document.body.style.pointerEvents = '';
+      document.body.style.paddingRight = '';
+      // Restore the exact scroll position that was saved at open time.
+      window.scrollTo(0, scrollY);
     };
   }, [isOpen]);
 

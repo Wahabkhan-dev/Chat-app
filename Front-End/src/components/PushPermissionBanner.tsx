@@ -3,31 +3,33 @@
 import React, { useEffect, useState } from 'react';
 import { Bell, X } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
-import { isIOS, isAndroid, isPWA, isIOSPWAWithPushSupport, subscribePushDevice } from '@/lib/pushSubscribe';
+import { isIOS, isAndroid, isIOSPWAWithPushSupport, subscribePushDevice } from '@/lib/pushSubscribe';
 
-const DISMISSED_KEY = 'push_banner_dismissed';
+// Bump the key if the banner logic changes so users see it again
+const DISMISSED_KEY = 'push_banner_dismissed_v3';
 
 const PushPermissionBanner: React.FC = () => {
   const { state } = useAppContext();
   const [visible, setVisible] = useState(false);
-  const [scenario, setScenario] = useState<'ios' | 'android_denied' | null>(null);
+  // 'ask'    — permission not yet requested; tapping will trigger the browser dialog
+  // 'denied' — user previously denied; guide them to browser settings
+  const [scenario, setScenario] = useState<'ask' | 'denied' | null>(null);
 
   useEffect(() => {
     if (!state.isAuthenticated || !state.currentUser) return;
     if (typeof window === 'undefined') return;
-    if (sessionStorage.getItem(DISMISSED_KEY)) return;
     if (!('Notification' in window)) return;
+    if (sessionStorage.getItem(DISMISSED_KEY)) return;
     if (Notification.permission === 'granted') return;
 
-    if (isIOSPWAWithPushSupport() && Notification.permission !== 'granted') {
-      // iOS PWA with push support — show prompt so user can tap to grant
-      setScenario('ios');
-      setVisible(true);
-    } else if (isAndroid() && Notification.permission === 'denied') {
-      // Android with denied permission — guide user to fix it in settings
-      setScenario('android_denied');
-      setVisible(true);
-    }
+    const onMobile = isIOS() || isAndroid();
+    if (!onMobile) return;
+
+    // iOS requires standalone PWA mode and PushManager support
+    if (isIOS() && !isIOSPWAWithPushSupport()) return;
+
+    setScenario(Notification.permission === 'denied' ? 'denied' : 'ask');
+    setVisible(true);
   }, [state.isAuthenticated, state.currentUser?.id]);
 
   const dismiss = () => {
@@ -35,52 +37,53 @@ const PushPermissionBanner: React.FC = () => {
     setVisible(false);
   };
 
-  const handleIOSTap = async () => {
+  const handleEnable = async () => {
     if (!state.currentUser?.id) return;
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      await subscribePushDevice(state.currentUser.id);
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted') {
+        subscribePushDevice(state.currentUser.id); // fire-and-forget
+      } else if (permission === 'denied') {
+        // Browser denied — switch to the settings-guidance variant
+        setScenario('denied');
+        return;
+      }
+    } catch {
+      // iOS may throw if called outside a user gesture; shouldn't happen here
     }
     dismiss();
   };
 
   if (!visible || !scenario) return null;
 
-  if (scenario === 'android_denied') {
+  if (scenario === 'denied') {
     return (
-      <div className="md:hidden fixed bottom-20 left-3 right-3 z-50 rounded-2xl bg-destructive/10 border border-destructive/30 p-4 flex items-start gap-3 shadow-lg">
-        <Bell className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-bold text-foreground">Enable notifications</p>
-          <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-            Notifications are blocked. Open your browser settings, find this site, and allow notifications.
-          </p>
-        </div>
-        <button onClick={dismiss} className="shrink-0 p-1 -mt-1 -mr-1 hover:bg-muted rounded-full" aria-label="Dismiss">
-          <X className="h-4 w-4 text-muted-foreground" />
+      <div className="md:hidden fixed top-0 left-0 right-0 z-[9998] flex items-center gap-3 py-2.5 px-4 bg-amber-500 text-white shadow-md">
+        <Bell className="h-4 w-4 shrink-0" />
+        <p className="flex-1 text-[11px] font-semibold leading-snug">
+          Notifications blocked — go to browser settings and allow notifications for this site
+        </p>
+        <button onClick={dismiss} aria-label="Dismiss" className="shrink-0 p-1 rounded-full hover:bg-white/20 transition-colors">
+          <X className="h-3.5 w-3.5" />
         </button>
       </div>
     );
   }
 
-  // iOS PWA scenario
   return (
-    <div className="md:hidden fixed bottom-20 left-3 right-3 z-50 rounded-2xl bg-primary/10 border border-primary/30 p-4 flex items-start gap-3 shadow-lg">
-      <Bell className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-bold text-foreground">Stay notified</p>
-        <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-          Tap to enable push notifications so you don't miss messages.
-        </p>
-        <button
-          onClick={handleIOSTap}
-          className="mt-2 px-3 py-1.5 bg-primary text-white text-[11px] font-bold rounded-lg uppercase tracking-widest"
-        >
-          Enable notifications
-        </button>
-      </div>
-      <button onClick={dismiss} className="shrink-0 p-1 -mt-1 -mr-1 hover:bg-muted rounded-full" aria-label="Dismiss">
-        <X className="h-4 w-4 text-muted-foreground" />
+    <div className="md:hidden fixed top-0 left-0 right-0 z-[9998] flex items-center gap-3 py-2.5 px-4 bg-primary text-white shadow-md">
+      <Bell className="h-4 w-4 shrink-0" />
+      <p className="flex-1 text-[11px] font-semibold leading-snug">
+        Enable notifications to receive messages instantly
+      </p>
+      <button
+        onClick={handleEnable}
+        className="shrink-0 px-3 py-1 bg-white text-primary text-[11px] font-bold rounded-full whitespace-nowrap transition-opacity hover:opacity-90"
+      >
+        Enable
+      </button>
+      <button onClick={dismiss} aria-label="Dismiss" className="shrink-0 p-1 rounded-full hover:bg-white/20 transition-colors">
+        <X className="h-3.5 w-3.5" />
       </button>
     </div>
   );
