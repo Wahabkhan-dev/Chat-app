@@ -283,41 +283,41 @@ const SettingsPage: React.FC = () => {
                 Receive instant notifications for new messages even when the app is in the background or closed.
               </p>
 
-              {pushStatus === 'checking' && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Checking notification status…
-                </div>
-              )}
-
-              {pushStatus === 'unsupported' && (
-                <div className="flex items-center gap-3 p-4 rounded-xl bg-muted/40 border border-border text-sm text-muted-foreground font-medium">
-                  <BellOff className="h-5 w-5 shrink-0" />
-                  Push notifications are not supported on this browser or device.
-                </div>
-              )}
-
-              {(pushStatus === 'idle' || pushStatus === 'blocked' || pushStatus === 'subscribed') && (
-                <div className="space-y-4">
-                  {/* Status row */}
-                  <div className={cn(
-                    'flex items-center gap-3 p-4 rounded-xl border text-sm font-medium',
-                    pushStatus === 'subscribed'
-                      ? 'bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-400'
-                      : pushStatus === 'blocked'
-                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400'
-                      : 'bg-muted/40 border-border text-muted-foreground'
-                  )}>
-                    {pushStatus === 'subscribed' && <CheckCircle2 className="h-5 w-5 shrink-0" />}
-                    {pushStatus === 'blocked'    && <BellOff className="h-5 w-5 shrink-0" />}
-                    {pushStatus === 'idle'       && <Bell className="h-5 w-5 shrink-0" />}
-                    {pushStatus === 'subscribed' && 'Notifications are enabled on this device.'}
-                    {pushStatus === 'blocked'    && 'Notifications are blocked. Open your browser or device settings and allow notifications for this site, then return here.'}
-                    {pushStatus === 'idle'       && 'Notifications are not yet enabled on this device.'}
+              <div className="space-y-4">
+                {pushStatus === 'checking' && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Checking notification status…
                   </div>
+                )}
 
-                  {/* Action buttons */}
-                  <div className="flex flex-col sm:flex-row gap-3">
+                {pushStatus === 'unsupported' && (
+                  <div className="flex items-center gap-3 p-4 rounded-xl bg-muted/40 border border-border text-sm text-muted-foreground font-medium">
+                    <BellOff className="h-5 w-5 shrink-0" />
+                    Push notifications are not supported on this browser or device.
+                  </div>
+                )}
+
+                {(pushStatus === 'idle' || pushStatus === 'blocked' || pushStatus === 'subscribed') && (
+                  <>
+                    {/* Status row */}
+                    <div className={cn(
+                      'flex items-center gap-3 p-4 rounded-xl border text-sm font-medium',
+                      pushStatus === 'subscribed'
+                        ? 'bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-400'
+                        : pushStatus === 'blocked'
+                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400'
+                        : 'bg-muted/40 border-border text-muted-foreground'
+                    )}>
+                      {pushStatus === 'subscribed' && <CheckCircle2 className="h-5 w-5 shrink-0" />}
+                      {pushStatus === 'blocked'    && <BellOff className="h-5 w-5 shrink-0" />}
+                      {pushStatus === 'idle'       && <Bell className="h-5 w-5 shrink-0" />}
+                      {pushStatus === 'subscribed' && 'Notifications are enabled on this device.'}
+                      {pushStatus === 'blocked'    && 'Notifications are blocked. Open your browser or device settings and allow notifications for this site, then return here.'}
+                      {pushStatus === 'idle'       && 'Notifications are not yet enabled on this device.'}
+                    </div>
+
+                    {/* Enable button */}
                     {(pushStatus === 'idle' || pushStatus === 'subscribed') && (
                       <Button
                         onClick={pushStatus === 'idle' ? handleEnablePush : undefined}
@@ -338,24 +338,23 @@ const SettingsPage: React.FC = () => {
                         )}
                       </Button>
                     )}
+                  </>
+                )}
 
-                    {pushStatus === 'subscribed' && (
-                      <Button
-                        variant="outline"
-                        onClick={handleTestPush}
-                        disabled={isTesting}
-                        className="rounded-xl h-11 px-6 font-bold gap-2 border-border hover:bg-primary/5 hover:text-primary transition-all w-full sm:w-auto"
-                      >
-                        {isTesting ? (
-                          <><Loader2 className="h-4 w-4 animate-spin" />Sending…</>
-                        ) : (
-                          <><Send className="h-4 w-4" />Send Test Notification</>
-                        )}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              )}
+                {/* Send Test Notification — always visible on every device */}
+                <Button
+                  variant="outline"
+                  onClick={handleTestPush}
+                  disabled={isTesting}
+                  className="rounded-xl h-11 px-6 font-bold gap-2 border-border hover:bg-primary/5 hover:text-primary transition-all w-full sm:w-auto"
+                >
+                  {isTesting ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" />Sending…</>
+                  ) : (
+                    <><Send className="h-4 w-4" />Send Test Notification</>
+                  )}
+                </Button>
+              </div>
             </div>
           </TabsContent>
 
