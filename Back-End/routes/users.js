@@ -245,7 +245,65 @@ router.patch('/:id/password', authenticateToken, requireAdmin, async (req, res) 
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
     await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, id]);
-    res.json({ message: 'Password updated.' });
+
+    // Invalidate all active sessions for this user so existing logins are revoked
+    try {
+      await sessionService.invalidateAllUserSessions(id);
+    } catch (e) {
+      console.warn('[users] failed to invalidate sessions for password override user', id, e.message || e);
+    }
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${id}`).emit('force_logout', { reason: 'password_changed' });
+    }
+
+    res.json({ message: 'Password updated and all existing sessions invalidated.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+// PATCH /api/users/me/password — current user changes their own password
+router.patch('/me/password', authenticateToken, async (req, res) => {
+  const userId = req.user.id;
+  const { currentPassword, newPassword } = req.body;
+
+  if (!newPassword || newPassword.length < 6) {
+    return res.status(400).json({ message: 'New password must be at least 6 characters.' });
+  }
+
+  try {
+    if (!currentPassword) {
+      return res.status(400).json({ message: 'Current password is required.' });
+    }
+
+    const [rows] = await pool.query('SELECT password FROM users WHERE id = ?', [userId]);
+    if (!rows.length) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    const user = rows[0];
+    if (!(await bcrypt.compare(currentPassword, user.password))) {
+      return res.status(403).json({ message: 'Current password is incorrect.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, userId]);
+
+    try {
+      await sessionService.invalidateAllUserSessions(userId);
+    } catch (e) {
+      console.warn('[users] failed to invalidate sessions for current user password change', userId, e.message || e);
+    }
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${userId}`).emit('force_logout', { reason: 'password_changed' });
+    }
+
+    res.json({ message: 'Password changed and all sessions invalidated.' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error.' });

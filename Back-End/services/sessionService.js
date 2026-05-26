@@ -99,6 +99,23 @@ async function invalidateSession(sessionId, userId) {
  */
 async function invalidateAllUserSessions(userId) {
   try {
+    const [sessions] = await pool.query(
+      `SELECT token_hash, expires_at FROM user_sessions WHERE user_id = ? AND is_active = 1`,
+      [userId]
+    );
+
+    if (sessions.length) {
+      const insertPromises = sessions.map((session) =>
+        pool.query(
+          `INSERT INTO token_blacklist (token_hash, user_id, expires_at, blacklist_at)
+           VALUES (?, ?, ?, NOW())
+           ON DUPLICATE KEY UPDATE blacklist_at = NOW(), expires_at = VALUES(expires_at)`,
+          [session.token_hash, userId, session.expires_at]
+        )
+      );
+      await Promise.all(insertPromises);
+    }
+
     const [result] = await pool.query(
       `UPDATE user_sessions SET is_active = 0, logged_out_at = NOW() WHERE user_id = ? AND is_active = 1`,
       [userId]
