@@ -1,10 +1,10 @@
 ﻿
 "use client";
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAppContext } from '@/context/AppContext';
 import { updateSetting } from '@/services/settings';
-import { User, Palette, Save, Loader2, Monitor, Moon, Sun, Globe, Camera } from 'lucide-react';
+import { User, Palette, Save, Loader2, Monitor, Moon, Sun, Globe, Camera, Bell, BellOff, CheckCircle2, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -27,6 +27,74 @@ const SettingsPage: React.FC = () => {
     department: state.currentUser?.department || '',
     title: 'Senior Engineer',
   });
+
+  // ── Push notification state ───────────────────────────────────────────────
+  type PushStatus = 'checking' | 'unsupported' | 'blocked' | 'idle' | 'subscribed';
+  const [pushStatus, setPushStatus] = useState<PushStatus>('checking');
+  const [isEnabling, setIsEnabling] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      if (typeof window === 'undefined') { setPushStatus('unsupported'); return; }
+      if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+        setPushStatus('unsupported'); return;
+      }
+      if (Notification.permission === 'denied') { setPushStatus('blocked'); return; }
+      if (Notification.permission === 'granted') {
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          const sub = await reg.pushManager.getSubscription();
+          setPushStatus(sub ? 'subscribed' : 'idle');
+        } catch { setPushStatus('idle'); }
+        return;
+      }
+      setPushStatus('idle'); // 'default' — never asked
+    })();
+  }, []);
+
+  const handleEnablePush = async () => {
+    setIsEnabling(true);
+    try {
+      let permission = Notification.permission;
+      if (permission === 'default') permission = await Notification.requestPermission();
+      if (permission !== 'granted') { setPushStatus('blocked'); return; }
+
+      const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+      if (!vapidKey) throw new Error('Push notifications are not configured');
+
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        // Decode VAPID public key (Base64url → Uint8Array)
+        const b64 = (vapidKey + '='.repeat((4 - vapidKey.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+        const key = Uint8Array.from([...atob(b64)].map(c => c.charCodeAt(0)));
+        sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      }
+
+      const { api } = await import('@/lib/api');
+      await api.post('/push/subscribe', { subscription: sub.toJSON() });
+      setPushStatus('subscribed');
+      toast({ title: 'Notifications enabled', description: 'You will now receive push notifications on this device.' });
+    } catch (err: any) {
+      toast({ title: 'Could not enable notifications', description: err?.message || 'Something went wrong.', variant: 'destructive' });
+    } finally {
+      setIsEnabling(false);
+    }
+  };
+
+  const handleTestPush = async () => {
+    setIsTesting(true);
+    try {
+      const { api } = await import('@/lib/api');
+      await api.post('/push/test', {});
+      toast({ title: 'Test notification sent', description: 'You should receive a notification on this device shortly.' });
+    } catch (err: any) {
+      toast({ title: 'Test failed', description: err?.message || 'Could not send test notification.', variant: 'destructive' });
+    } finally {
+      setIsTesting(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!state.currentUser) return;
@@ -97,6 +165,10 @@ const SettingsPage: React.FC = () => {
             <TabsTrigger value="appearance" className="flex-1 md:flex-none gap-2 px-4 md:px-6 py-2 rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white transition-all font-bold text-xs uppercase tracking-widest">
               <Palette className="h-4 w-4" />
               <span>Appearance</span>
+            </TabsTrigger>
+            <TabsTrigger value="notifications" className="flex-1 md:flex-none gap-2 px-4 md:px-6 py-2 rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white transition-all font-bold text-xs uppercase tracking-widest">
+              <Bell className="h-4 w-4" />
+              <span>Notifications</span>
             </TabsTrigger>
           </TabsList>
 
@@ -201,6 +273,89 @@ const SettingsPage: React.FC = () => {
                    <Button variant="ghost" size="sm" className="font-bold text-primary hover:bg-primary/5 rounded-lg h-9 px-4">English (US)</Button>
                 </div>
               </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="notifications" className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
+            <div className="bg-card rounded-2xl border border-border shadow-sm p-4 md:p-8">
+              <h3 className="text-lg font-bold mb-1 font-headline">Push Notifications</h3>
+              <p className="text-sm text-muted-foreground mb-6 font-medium leading-relaxed">
+                Receive instant notifications for new messages even when the app is in the background or closed.
+              </p>
+
+              {pushStatus === 'checking' && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Checking notification status…
+                </div>
+              )}
+
+              {pushStatus === 'unsupported' && (
+                <div className="flex items-center gap-3 p-4 rounded-xl bg-muted/40 border border-border text-sm text-muted-foreground font-medium">
+                  <BellOff className="h-5 w-5 shrink-0" />
+                  Push notifications are not supported on this browser or device.
+                </div>
+              )}
+
+              {(pushStatus === 'idle' || pushStatus === 'blocked' || pushStatus === 'subscribed') && (
+                <div className="space-y-4">
+                  {/* Status row */}
+                  <div className={cn(
+                    'flex items-center gap-3 p-4 rounded-xl border text-sm font-medium',
+                    pushStatus === 'subscribed'
+                      ? 'bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-400'
+                      : pushStatus === 'blocked'
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400'
+                      : 'bg-muted/40 border-border text-muted-foreground'
+                  )}>
+                    {pushStatus === 'subscribed' && <CheckCircle2 className="h-5 w-5 shrink-0" />}
+                    {pushStatus === 'blocked'    && <BellOff className="h-5 w-5 shrink-0" />}
+                    {pushStatus === 'idle'       && <Bell className="h-5 w-5 shrink-0" />}
+                    {pushStatus === 'subscribed' && 'Notifications are enabled on this device.'}
+                    {pushStatus === 'blocked'    && 'Notifications are blocked. Open your browser or device settings and allow notifications for this site, then return here.'}
+                    {pushStatus === 'idle'       && 'Notifications are not yet enabled on this device.'}
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    {(pushStatus === 'idle' || pushStatus === 'subscribed') && (
+                      <Button
+                        onClick={pushStatus === 'idle' ? handleEnablePush : undefined}
+                        disabled={isEnabling || pushStatus === 'subscribed'}
+                        className={cn(
+                          'rounded-xl h-11 px-6 font-bold gap-2 transition-all',
+                          pushStatus === 'subscribed'
+                            ? 'bg-green-600 hover:bg-green-600 text-white cursor-default'
+                            : 'bg-primary hover:bg-primary/90 text-white shadow-lg shadow-primary/20'
+                        )}
+                      >
+                        {isEnabling ? (
+                          <><Loader2 className="h-4 w-4 animate-spin" />Enabling…</>
+                        ) : pushStatus === 'subscribed' ? (
+                          <><CheckCircle2 className="h-4 w-4" />Notifications Enabled</>
+                        ) : (
+                          <><Bell className="h-4 w-4" />Enable Notifications</>
+                        )}
+                      </Button>
+                    )}
+
+                    {pushStatus === 'subscribed' && (
+                      <Button
+                        variant="outline"
+                        onClick={handleTestPush}
+                        disabled={isTesting}
+                        className="rounded-xl h-11 px-6 font-bold gap-2 border-border hover:bg-primary/5 hover:text-primary transition-all"
+                      >
+                        {isTesting ? (
+                          <><Loader2 className="h-4 w-4 animate-spin" />Sending…</>
+                        ) : (
+                          <><Send className="h-4 w-4" />Send Test Notification</>
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </TabsContent>
 
