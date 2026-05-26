@@ -6,7 +6,7 @@ webpush.setVapidDetails(
   process.env.VAPID_PUBLIC_KEY,
   process.env.VAPID_PRIVATE_KEY
 );
-
+// CHECK
 async function sendPushToUser(userId, payload) {
   try {
     const [subs] = await pool.query(
