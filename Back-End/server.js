@@ -64,11 +64,19 @@ const ALLOWED_ORIGINS = [...new Set([
 
 const corsOptions = {
   origin: (origin, callback) => {
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS origin denied: ${origin}`));
-    }
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    // Allow exact whitelist matches
+    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    // Allow any Vercel preview/production URL for this project
+    if (/^https:\/\/[\w-]+-mawby(technologies)?\.vercel\.app$/.test(origin)) return callback(null, true);
+    if (/^https:\/\/chat-app[\w-]*\.vercel\.app$/.test(origin)) return callback(null, true);
+    // Allow any origin matching the configured production domain
+    const prodDomain = process.env.PRODUCTION_DOMAIN?.trim();
+    if (prodDomain && origin.endsWith(prodDomain)) return callback(null, true);
+
+    console.warn('[CORS] blocked origin:', origin);
+    callback(new Error(`CORS origin denied: ${origin}`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

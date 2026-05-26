@@ -22,17 +22,18 @@ router.post('/subscribe', authenticateToken, async (req, res) => {
       `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth)
        VALUES (?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
-         user_id  = VALUES(user_id),
-         p256dh   = VALUES(p256dh),
-         auth     = VALUES(auth),
+         user_id    = VALUES(user_id),
+         p256dh     = VALUES(p256dh),
+         auth       = VALUES(auth),
          updated_at = NOW()`,
       [userId, subscription.endpoint, subscription.keys.p256dh, subscription.keys.auth]
     );
     console.log(`[push] subscription saved for user ${userId}`);
     res.json({ success: true });
   } catch (err) {
-    console.error('[push] subscribe error:', err);
-    res.status(500).json({ message: 'Server error.' });
+    console.error('[push] subscribe DB error — code:', err.code, '| message:', err.message);
+    console.error('[push] subscribe DB error — full:', err);
+    res.status(500).json({ message: `Server error: ${err.message}` });
   }
 });
 
