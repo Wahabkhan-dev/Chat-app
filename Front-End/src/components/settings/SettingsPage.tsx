@@ -86,7 +86,39 @@ const SettingsPage: React.FC = () => {
   const handleTestPush = async () => {
     setIsTesting(true);
     try {
+      // Check push support
+      if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+        toast({ title: 'Not supported', description: 'Push notifications are not supported on this device.', variant: 'destructive' });
+        return;
+      }
+
+      // Request permission if not yet granted
+      let permission = Notification.permission;
+      if (permission === 'default') permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        toast({ title: 'Permission denied', description: 'Please allow notifications in your browser or device settings.', variant: 'destructive' });
+        setPushStatus('blocked');
+        return;
+      }
+
+      const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+      if (!vapidKey) throw new Error('Push notifications are not configured on this server.');
+
+      // Get existing subscription or create a new one
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        const b64 = (vapidKey + '='.repeat((4 - vapidKey.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+        const key = Uint8Array.from([...atob(b64)].map(c => c.charCodeAt(0)));
+        sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      }
+
+      // Always save subscription to DB before sending — backend handles duplicates safely
       const { api } = await import('@/lib/api');
+      await api.post('/push/subscribe', { subscription: sub.toJSON() });
+      setPushStatus('subscribed');
+
+      // Now send the test notification
       await api.post('/push/test', {});
       toast({ title: 'Test notification sent', description: 'You should receive a notification on this device shortly.' });
     } catch (err: any) {
