@@ -57,32 +57,57 @@ const SettingsPage: React.FC = () => {
   const handleEnablePush = async () => {
     setIsEnabling(true);
     try {
-      // Step 1 — Ask permission
+      console.log('[push] Enable Notifications clicked');
+
+      // Step 1 — Permission
+      console.log('[push] requesting notification permission...');
       const permission = await Notification.requestPermission();
+      console.log('[push] permission result:', permission);
       if (permission !== 'granted') {
-        toast({ title: 'Permission denied', description: 'Please allow notifications in browser settings.', variant: 'destructive' });
+        toast({ title: 'Permission denied', description: 'Please allow notifications in your browser settings and try again.', variant: 'destructive' });
         setPushStatus('blocked');
         return;
       }
 
-      // Step 2 — Create push subscription
+      // Step 2 — VAPID key check
       const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-      if (!vapidKey) throw new Error('Push notifications are not configured on this server.');
-      const registration = await navigator.serviceWorker.ready;
+      console.log('[push] VAPID key present:', !!vapidKey);
+      if (!vapidKey) {
+        toast({ title: 'Configuration error', description: 'VAPID public key is missing. Contact support.', variant: 'destructive' });
+        return;
+      }
+
+      // Step 3 — Wait for service worker (10s max so it never hangs forever)
+      console.log('[push] waiting for service worker to be ready...');
+      const registration = await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Service worker not ready after 10 seconds. Try reloading the app.')), 10000)
+        ),
+      ]) as ServiceWorkerRegistration;
+      console.log('[push] service worker ready, scope:', registration.scope);
+
+      // Step 4 — Create push subscription
+      console.log('[push] calling pushManager.subscribe...');
       const sub = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(vapidKey),
       });
+      console.log('[push] subscription created:', sub.endpoint.slice(0, 80));
 
-      // Step 3 — Save subscription to backend
+      // Step 5 — Hit the API to save subscription to DB
+      console.log('[push] saving subscription to backend...');
       const { api } = await import('@/lib/api');
-      await api.post('/push/subscribe', { subscription: sub.toJSON() });
+      const result = await api.post('/push/subscribe', { subscription: sub.toJSON() });
+      console.log('[push] backend response:', JSON.stringify(result));
 
-      // Step 4 — Success
+      // Success
       setPushStatus('subscribed');
-      toast({ title: 'Notifications enabled successfully', description: 'You will now receive push notifications on this device.' });
+      toast({ title: 'Notifications enabled', description: 'This device is now registered. You will receive push notifications.' });
+      console.log('[push] DONE — device registered in DB successfully');
     } catch (err: any) {
-      toast({ title: 'Could not enable notifications', description: err?.message || 'Something went wrong.', variant: 'destructive' });
+      console.error('[push] FAILED at step —', err?.name, ':', err?.message, err);
+      toast({ title: 'Failed to enable notifications', description: err?.message || 'Something went wrong. Check the console for details.', variant: 'destructive' });
     } finally {
       setIsEnabling(false);
     }
