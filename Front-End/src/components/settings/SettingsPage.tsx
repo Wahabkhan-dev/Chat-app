@@ -15,6 +15,17 @@ import { toast } from '@/hooks/use-toast';
 import { Avatar } from '../ui/avatar';
 import { cn } from '@/lib/utils';
 
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
 const SettingsPage: React.FC = () => {
   const { state, dispatch } = useAppContext();
   const [isSaving, setIsSaving] = useState(false);
@@ -29,58 +40,47 @@ const SettingsPage: React.FC = () => {
   });
 
   // ── Push notification state ───────────────────────────────────────────────
-  type PushStatus = 'checking' | 'unsupported' | 'blocked' | 'idle' | 'subscribed';
-  const [pushStatus, setPushStatus] = useState<PushStatus>('checking');
+  type PushStatus = 'unsupported' | 'blocked' | 'idle' | 'subscribed';
+  const [pushStatus, setPushStatus] = useState<PushStatus>('idle');
   const [isEnabling, setIsEnabling] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
 
+  // Detect unsupported/blocked synchronously after mount — no async, no hangs
   useEffect(() => {
-    // Synchronous checks — these never hang
-    if (typeof window === 'undefined') { setPushStatus('idle'); return; }
     if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
-      setPushStatus('unsupported'); return;
+      setPushStatus('unsupported');
+    } else if (Notification.permission === 'denied') {
+      setPushStatus('blocked');
     }
-    if (Notification.permission === 'denied') { setPushStatus('blocked'); return; }
-    if (Notification.permission !== 'granted') { setPushStatus('idle'); return; }
-
-    // Permission already granted — try to read existing subscription, but never wait more than 3s.
-    // If serviceWorker.ready hangs (common on some Android browsers), fall through to idle so buttons always show.
-    let settled = false;
-    const fallback = setTimeout(() => {
-      if (!settled) { settled = true; setPushStatus('idle'); }
-    }, 3000);
-
-    navigator.serviceWorker.ready
-      .then(reg => reg.pushManager.getSubscription())
-      .then(sub => { if (!settled) { settled = true; clearTimeout(fallback); setPushStatus(sub ? 'subscribed' : 'idle'); } })
-      .catch(() => { if (!settled) { settled = true; clearTimeout(fallback); setPushStatus('idle'); } });
-
-    return () => clearTimeout(fallback);
   }, []);
 
   const handleEnablePush = async () => {
     setIsEnabling(true);
     try {
-      let permission = Notification.permission;
-      if (permission === 'default') permission = await Notification.requestPermission();
-      if (permission !== 'granted') { setPushStatus('blocked'); return; }
-
-      const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-      if (!vapidKey) throw new Error('Push notifications are not configured');
-
-      const reg = await navigator.serviceWorker.ready;
-      let sub = await reg.pushManager.getSubscription();
-      if (!sub) {
-        // Decode VAPID public key (Base64url → Uint8Array)
-        const b64 = (vapidKey + '='.repeat((4 - vapidKey.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/');
-        const key = Uint8Array.from([...atob(b64)].map(c => c.charCodeAt(0)));
-        sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      // Step 1 — Ask permission
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        toast({ title: 'Permission denied', description: 'Please allow notifications in browser settings.', variant: 'destructive' });
+        setPushStatus('blocked');
+        return;
       }
 
+      // Step 2 — Create push subscription
+      const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+      if (!vapidKey) throw new Error('Push notifications are not configured on this server.');
+      const registration = await navigator.serviceWorker.ready;
+      const sub = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+      });
+
+      // Step 3 — Save subscription to backend
       const { api } = await import('@/lib/api');
       await api.post('/push/subscribe', { subscription: sub.toJSON() });
+
+      // Step 4 — Success
       setPushStatus('subscribed');
-      toast({ title: 'Notifications enabled', description: 'You will now receive push notifications on this device.' });
+      toast({ title: 'Notifications enabled successfully', description: 'You will now receive push notifications on this device.' });
     } catch (err: any) {
       toast({ title: 'Could not enable notifications', description: err?.message || 'Something went wrong.', variant: 'destructive' });
     } finally {
@@ -321,13 +321,6 @@ const SettingsPage: React.FC = () => {
               </p>
 
               <div className="space-y-4">
-                {pushStatus === 'checking' && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Checking notification status…
-                  </div>
-                )}
-
                 {pushStatus === 'unsupported' && (
                   <div className="flex items-center gap-3 p-4 rounded-xl bg-muted/40 border border-border text-sm text-muted-foreground font-medium">
                     <BellOff className="h-5 w-5 shrink-0" />
