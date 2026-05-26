@@ -1,59 +1,49 @@
 'use client';
 
-// ⚠️ TESTING ONLY — Remove this component and its usage in layout.tsx before final release.
-// Purpose: mobile debugger for inspecting push subscription logs, SW errors, and network requests.
+/*
+ * ============================================================
+ * TESTING ONLY — REMOVE BEFORE PRODUCTION
+ * ============================================================
+ * Eruda mobile debugger — lets you inspect console logs,
+ * network requests, and JS errors directly on mobile.
+ *
+ * HOW TO ACTIVATE on any device:
+ *   Option A — URL param (easiest):
+ *     Open the app with ?debug=true in the URL, e.g.:
+ *     https://yourapp.com/?debug=true
+ *     This sets the localStorage flag automatically.
+ *
+ *   Option B — Browser console (one-time):
+ *     localStorage.setItem('eruda', 'true')
+ *     then reload the page.
+ *
+ * HOW TO DEACTIVATE:
+ *   localStorage.removeItem('eruda')  then reload.
+ *
+ * TO REMOVE: delete this file and remove the import +
+ *   <ErudaInit /> from layout.tsx.
+ * ============================================================
+ */
 
 import { useEffect } from 'react';
 
-function loadEruda() {
-  if (typeof window === 'undefined') return;
-  if ((window as any).__eruda_loaded__) return;
-  (window as any).__eruda_loaded__ = true;
-
-  const script = document.createElement('script');
-  script.src = 'https://cdn.jsdelivr.net/npm/eruda';
-  script.onload = () => {
-    (window as any).eruda?.init();
-    console.log('[Eruda] mobile debugger ready');
-  };
-  document.head.appendChild(script);
-}
-
 export function ErudaInit() {
   useEffect(() => {
-    const isDev = process.env.NODE_ENV === 'development';
-
-    if (isDev) {
-      // Auto-load in development
-      loadEruda();
-      return;
+    // Persist the flag if ?debug=true is in the URL
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('debug') === 'true') {
+      localStorage.setItem('eruda', 'true');
     }
 
-    // Production: load after 5 taps within 3 seconds on the top-left corner area
-    let taps = 0;
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    if (localStorage.getItem('eruda') !== 'true') return;
 
-    const onTap = (e: TouchEvent) => {
-      // Only count taps in the top-left 80x80px area (hidden trigger zone)
-      const t = e.touches[0] || e.changedTouches[0];
-      if (!t || t.clientX > 80 || t.clientY > 80) return;
-
-      taps++;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => { taps = 0; }, 3000);
-
-      if (taps >= 5) {
-        taps = 0;
-        if (timer) clearTimeout(timer);
-        loadEruda();
-      }
+    // Inject Eruda from CDN — zero impact on bundle
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/eruda';
+    script.onload = () => {
+      (window as any).eruda?.init();
     };
-
-    document.addEventListener('touchstart', onTap, { passive: true });
-    return () => {
-      document.removeEventListener('touchstart', onTap);
-      if (timer) clearTimeout(timer);
-    };
+    document.head.appendChild(script);
   }, []);
 
   return null;
