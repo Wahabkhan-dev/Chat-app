@@ -6,6 +6,8 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { SessionExpiryWarning } from '@/components/SessionExpiryWarning';
 import { PwaInit } from '@/components/PwaInit';
+// ⚠️ TESTING ONLY — remove ErudaInit import and usage before final release
+import { ErudaInit } from '@/components/ErudaInit';
 
 export const metadata: Metadata = {
   title: 'Mawby Teams Chat | Internal Communication',
@@ -43,6 +45,7 @@ export default function RootLayout({
             <Toaster />
             <SessionExpiryWarning />
             <PwaInit />
+            <ErudaInit />
           </TooltipProvider>
         </AppProvider>
       </body>
