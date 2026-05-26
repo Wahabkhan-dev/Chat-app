@@ -35,22 +35,27 @@ const SettingsPage: React.FC = () => {
   const [isTesting, setIsTesting] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      if (typeof window === 'undefined') { setPushStatus('unsupported'); return; }
-      if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
-        setPushStatus('unsupported'); return;
-      }
-      if (Notification.permission === 'denied') { setPushStatus('blocked'); return; }
-      if (Notification.permission === 'granted') {
-        try {
-          const reg = await navigator.serviceWorker.ready;
-          const sub = await reg.pushManager.getSubscription();
-          setPushStatus(sub ? 'subscribed' : 'idle');
-        } catch { setPushStatus('idle'); }
-        return;
-      }
-      setPushStatus('idle'); // 'default' — never asked
-    })();
+    // Synchronous checks — these never hang
+    if (typeof window === 'undefined') { setPushStatus('idle'); return; }
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+      setPushStatus('unsupported'); return;
+    }
+    if (Notification.permission === 'denied') { setPushStatus('blocked'); return; }
+    if (Notification.permission !== 'granted') { setPushStatus('idle'); return; }
+
+    // Permission already granted — try to read existing subscription, but never wait more than 3s.
+    // If serviceWorker.ready hangs (common on some Android browsers), fall through to idle so buttons always show.
+    let settled = false;
+    const fallback = setTimeout(() => {
+      if (!settled) { settled = true; setPushStatus('idle'); }
+    }, 3000);
+
+    navigator.serviceWorker.ready
+      .then(reg => reg.pushManager.getSubscription())
+      .then(sub => { if (!settled) { settled = true; clearTimeout(fallback); setPushStatus(sub ? 'subscribed' : 'idle'); } })
+      .catch(() => { if (!settled) { settled = true; clearTimeout(fallback); setPushStatus('idle'); } });
+
+    return () => clearTimeout(fallback);
   }, []);
 
   const handleEnablePush = async () => {
