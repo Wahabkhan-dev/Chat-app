@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
+const { sendPushToUser } = require('../services/pushService');
 
 const router = express.Router();
 
@@ -32,6 +33,35 @@ router.post('/subscribe', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('[push] subscribe error:', err);
     res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+// POST /api/push/test — send a test push notification to all devices of the current user
+router.post('/test', authenticateToken, async (req, res) => {
+  const userId = req.user.id;
+  console.log(`[push] test notification requested by user ${userId}`);
+
+  try {
+    const [subs] = await pool.query(
+      'SELECT id FROM push_subscriptions WHERE user_id = ?',
+      [userId]
+    );
+
+    if (!subs.length) {
+      return res.status(400).json({ message: 'No push subscriptions found for this device. Please enable notifications first.' });
+    }
+
+    await sendPushToUser(userId, {
+      title: 'Test Notification',
+      body: 'Push notifications are working correctly on this device.',
+      icon: '/icon-192x192.png',
+    });
+
+    console.log(`[push] test notification sent to user ${userId} (${subs.length} device(s))`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[push] test notification error:', err);
+    res.status(500).json({ message: 'Failed to send test notification.' });
   }
 });
 
