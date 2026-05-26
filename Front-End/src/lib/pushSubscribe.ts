@@ -129,3 +129,45 @@ export async function subscribePushDevice(
     return false;
   }
 }
+
+/**
+ * Dead-simple push subscription for login and app-load.
+ * Always runs the full flow: request permission → subscribe → POST to backend.
+ * No cache, no duplicate checks, no early-exit conditions.
+ * Backend uses ON DUPLICATE KEY UPDATE so duplicate POSTs are always safe.
+ * Never throws — login flow must never be interrupted by push errors.
+ */
+export async function pushOnLogin(userId: string | number): Promise<void> {
+  try {
+    if (typeof window === 'undefined') return;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
+
+    const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    if (!vapidKey) return;
+
+    // Request permission if the browser hasn't asked yet
+    if (Notification.permission === 'default') {
+      await Notification.requestPermission();
+    }
+    if (Notification.permission !== 'granted') return;
+
+    // Wait for the active service worker
+    const registration = await navigator.serviceWorker.ready;
+
+    // Get existing subscription or create a new one
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+      });
+    }
+
+    // Always POST — backend handles duplicates with ON DUPLICATE KEY UPDATE
+    await api.post('/push/subscribe', { subscription: subscription.toJSON() });
+    console.log('[push] pushOnLogin: device registered for user', userId);
+  } catch (err: any) {
+    // Silent — push failure must never interrupt the login or page-load flow
+    console.warn('[push] pushOnLogin failed (non-fatal):', err?.message);
+  }
+}

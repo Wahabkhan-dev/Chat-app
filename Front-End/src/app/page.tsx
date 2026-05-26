@@ -5,7 +5,7 @@ import { useAppContext } from '@/context/AppContext';
 import SignInPage from '@/components/auth/SignInPage';
 import AppShell from '@/components/layout/AppShell';
 import { getCurrentUser } from '@/services/auth';
-import { subscribePushDevice } from '@/lib/pushSubscribe';
+import { pushOnLogin } from '@/lib/pushSubscribe';
 import { Loader2 } from 'lucide-react';
 
 export default function Home() {
@@ -31,9 +31,7 @@ export default function Home() {
           },
         });
 
-        // On every app load, re-verify this device is in the push_subscriptions table.
-        // bypassCache forces the backend POST so a missing DB row is always repaired.
-        subscribePushDevice(String(user.id), { bypassCache: true }).catch(() => {});
+        pushOnLogin(String(user.id));
       }
       if (!user) {
         // Ensure local state and storage are cleared if server reports unauthorized

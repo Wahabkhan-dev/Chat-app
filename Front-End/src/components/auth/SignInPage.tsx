@@ -9,7 +9,7 @@ import { Eye, EyeOff, Lock, Mail, Loader2, ArrowLeft, MailCheck } from 'lucide-r
 import Image from 'next/image';
 import { BRAND_LOGO_URL, BRAND_LOGO_DARK_URL } from '@/lib/brand';
 import { initiateLogin, verifyOTP, resendOTP } from '@/services/auth';
-import { subscribePushDevice } from '@/lib/pushSubscribe';
+import { pushOnLogin } from '@/lib/pushSubscribe';
 import { cn } from '@/lib/utils';
 
 const SignInPage: React.FC = () => {
@@ -159,9 +159,7 @@ const SignInPage: React.FC = () => {
         },
       });
 
-      // Immediately subscribe this device — bypassCache forces the backend POST even if
-      // the endpoint was previously cached, guaranteeing a fresh DB row after every login.
-      subscribePushDevice(String(user.id), { bypassCache: true }).catch(() => {});
+      pushOnLogin(String(user.id));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Something went wrong. Please try again.';
       setOtpError(message);
