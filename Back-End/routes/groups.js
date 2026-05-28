@@ -327,15 +327,23 @@ router.patch('/:id/info', authenticateToken, avatarUpload.single('avatar'), asyn
   const groupId = req.params.id;
   const userId = req.user.id;
 
+  console.log(`[groups.PATCH /info] groupId=${groupId}, userId=${userId}, hasFile=${!!req.file}`);
+
   try {
     const membershipRole = await getActiveMembershipRole(groupId, userId);
     const isGroupAdmin = membershipRole && ['admin', 'owner'].includes(membershipRole);
     const isSiteAdmin = req.user.role === 'admin';
+    
+    console.log(`[groups.PATCH /info] membershipRole=${membershipRole}, isGroupAdmin=${isGroupAdmin}, isSiteAdmin=${isSiteAdmin}`);
+    
     if (!isGroupAdmin && !isSiteAdmin) {
+      console.log(`[groups.PATCH /info] Access denied - not admin`);
       return res.status(403).json({ message: 'Only group admins can update group info.' });
     }
 
     const { name, description } = req.body;
+    console.log(`[groups.PATCH /info] name="${name}", description="${description}"`);
+    
     const sets = [];
     const vals = [];
 
@@ -358,7 +366,10 @@ router.patch('/:id/info', authenticateToken, avatarUpload.single('avatar'), asyn
 
     if (sets.length > 0) {
       vals.push(groupId);
+      console.log(`[groups.PATCH /info] Updating group with ${sets.length} fields`);
       await pool.query(`UPDATE \`groups\` SET ${sets.join(', ')} WHERE id = ?`, vals);
+    } else {
+      console.log(`[groups.PATCH /info] No fields to update - skipping DB update`);
     }
 
     const [[updatedGroup]] = await pool.query('SELECT * FROM `groups` WHERE id = ?', [groupId]);
@@ -419,6 +430,7 @@ router.patch('/:id/info', authenticateToken, avatarUpload.single('avatar'), asyn
       }
     }
 
+    console.log(`[groups.PATCH /info] ✅ Success - returning group ${groupId}`);
     res.json({ message: 'Group updated.', group: groupPayload, avatarKey });
   } catch (err) {
     console.error('groups PATCH info error:', err);

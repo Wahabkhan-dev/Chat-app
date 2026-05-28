@@ -41,13 +41,34 @@ const EditGroupModal: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const { group: updatedGroupData } = await api.patch<{ message: string; group: any }>(
-        `/groups/${group.id}/info`,
-        {
-          name: name.trim(),
-          description: description.trim(),
-        }
-      );
+      // Create FormData for multipart request (supports avatar upload in future)
+      const formData = new FormData();
+      formData.append('name', name.trim());
+      formData.append('description', description.trim());
+
+      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://192.168.91.173:3001/api'}/groups/${group.id}/info`;
+      const token = localStorage.getItem('teams_token');
+      
+      console.log('[EditGroupModal] Updating group:', { groupId: group.id, apiUrl, token: token ? 'present' : 'missing' });
+
+      const res = await fetch(apiUrl, {
+        method: 'PATCH',
+        headers: {
+          ...(token && { 'Authorization': `Bearer ${token}` }),
+        },
+        body: formData,
+      });
+
+      console.log('[EditGroupModal] Response status:', res.status);
+
+      if (!res.ok) {
+        const error = await res.json();
+        console.error('[EditGroupModal] Error response:', error);
+        throw new Error(error.message || `HTTP ${res.status}: Failed to update group`);
+      }
+
+      const { group: updatedGroupData } = await res.json();
+      console.log('[EditGroupModal] Update successful:', updatedGroupData);
 
       const updatedGroup = {
         ...group,
@@ -61,6 +82,7 @@ const EditGroupModal: React.FC = () => {
       toast({ title: '✅ Success', description: `Group "${name}" updated successfully.`, type: 'success' });
       handleClose();
     } catch (err: unknown) {
+      console.error('[EditGroupModal] Error:', err);
       toast({
         title: '❌ Failed',
         description: err instanceof Error ? err.message : 'Could not update group.',
