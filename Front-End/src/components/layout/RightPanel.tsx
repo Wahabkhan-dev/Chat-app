@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { api } from '@/lib/api';
+import { api, getApiBaseUrl, getToken } from '@/lib/api';
 import { useAppContext } from '@/context/AppContext';
 import { setConversationBlockStatus, emitConversationMetadataChanged } from '@/services/conversationMetadata';
 import { useSignedUrl } from '@/hooks/useSignedUrl';
@@ -317,11 +317,10 @@ const RightPanel: React.FC = () => {
     if (!group) return;
     setIsUploadingImage(true);
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('teams_token') : null;
+      const token = getToken();
       const formData = new FormData();
       formData.append('avatar', file);
-      const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
-      const res = await fetch(`${BASE_URL}/groups/${group.id}/info`, {
+      const res = await fetch(`${getApiBaseUrl()}/groups/${group.id}/info`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
@@ -343,11 +342,10 @@ const RightPanel: React.FC = () => {
       return;
     }
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('teams_token') : null;
+      const token = getToken();
       const formData = new FormData();
       formData.append('name', editingName.trim());
-      const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
-      const res = await fetch(`${BASE_URL}/groups/${group.id}/info`, {
+      const res = await fetch(`${getApiBaseUrl()}/groups/${group.id}/info`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
@@ -368,11 +366,10 @@ const RightPanel: React.FC = () => {
       return;
     }
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('teams_token') : null;
+      const token = getToken();
       const formData = new FormData();
       formData.append('description', editingDescription.trim());
-      const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
-      const res = await fetch(`${BASE_URL}/groups/${group.id}/info`, {
+      const res = await fetch(`${getApiBaseUrl()}/groups/${group.id}/info`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,

@@ -3,6 +3,11 @@ const BASE_URL = _rawApiUrl.startsWith('http')
   ? _rawApiUrl
   : 'https://chat-app-wv5a.onrender.com/api';
 
+/** Returns the resolved API base URL. Use this instead of reading NEXT_PUBLIC_API_URL directly. */
+export function getApiBaseUrl(): string {
+  return BASE_URL;
+}
+
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem('teams_token');

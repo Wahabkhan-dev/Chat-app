@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/hooks/use-toast';
 import { Avatar } from '../ui/avatar';
 import { cn } from '@/lib/utils';
+import { getApiBaseUrl, getToken } from '@/lib/api';
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -239,9 +240,8 @@ const SettingsPage: React.FC = () => {
     try {
       const formData = new FormData();
       formData.append('avatar', file);
-      const token = typeof window !== 'undefined' ? localStorage.getItem('teams_token') : null;
-      const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
-      const res = await fetch(`${BASE_URL}/users/me/avatar`, {
+      const token = getToken();
+      const res = await fetch(`${getApiBaseUrl()}/users/me/avatar`, {
         method: 'PATCH',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
