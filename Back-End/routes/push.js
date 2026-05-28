@@ -55,7 +55,7 @@ router.post('/test', authenticateToken, async (req, res) => {
     await sendPushToUser(userId, {
       title: 'Test Notification',
       body: 'Push notifications are working correctly on this device.',
-      icon: '/icon-192x192.png',
+      icon: '/fav-1.webp',
     });
 
     console.log(`[push] test notification sent to user ${userId} (${subs.length} device(s))`);

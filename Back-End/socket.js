@@ -345,8 +345,8 @@ function setupSocket(io, optimizationService) {
             const pushPayload = {
               title: pushTitle,
               body: pushBody,
-              icon: '/icon-192.svg',
-              badge: '/icon-192.svg',
+              icon: '/fav-1.webp',
+              badge: '/fav-1.webp',
               conversationId,
               conversationType: conversationId.startsWith('dm_') ? 'dm' : 'group',
               url: '/',

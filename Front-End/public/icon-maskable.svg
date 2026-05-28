@@ -1,21 +1,15 @@
-<!-- Maskable icon: safe-zone is the inner 80% circle, so artwork stays within that -->
+<!-- Maskable icon: safe-zone is the inner 80% circle, logo stays within that -->
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#fb6a2c"/>
-      <stop offset="100%" stop-color="#e8521a"/>
-    </linearGradient>
-  </defs>
-  <!-- Full bleed background (maskable — no rounded corners, fills entire square) -->
-  <rect width="512" height="512" fill="url(#bg)"/>
-  <!-- M letter centred within safe zone (inner 80% = 102–410px) -->
+  <!-- White background to match the favicon -->
+  <rect width="512" height="512" fill="#ffffff"/>
+  <!-- Orange M centred within the safe zone (inner 80% = 102–410px) -->
   <text
     x="256"
-    y="320"
+    y="330"
     font-family="Arial Black, Arial, Helvetica, sans-serif"
-    font-size="200"
+    font-size="240"
     font-weight="900"
-    fill="white"
+    fill="#fb6a2c"
     text-anchor="middle"
     dominant-baseline="auto"
     letter-spacing="-4"

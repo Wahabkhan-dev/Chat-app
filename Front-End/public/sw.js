@@ -33,8 +33,8 @@ self.addEventListener('push', (event) => {
   const title = data.title || 'Mawby Teams';
   const options = {
     body: data.body || '',
-    icon: '/icon-192.svg',
-    badge: '/icon-192.svg',
+    icon: data.icon || '/fav-1.webp',
+    badge: '/fav-1.webp',
     tag: data.conversationId || 'mawby-teams-msg',
     renotify: true,
     data: {
