@@ -62,37 +62,3 @@ export const api = {
   delete: <T>(endpoint: string) =>
     request<T>(endpoint, { method: 'DELETE' }),
 };
-
-/**
- * Helper for multipart/form-data requests (file uploads, etc.)
- */
-export async function patchFormData<T>(
-  endpoint: string,
-  formData: FormData
-): Promise<T> {
-  const token = getToken();
-
-  const headers: Record<string, string> = {};
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
-    method: 'PATCH',
-    headers,
-    body: formData,
-  });
-
-  const data = await res.json();
-
-  if (res.status === 401) {
-    clearToken();
-    throw new Error('Unauthorized. Please login again.');
-  }
-
-  if (!res.ok) {
-    throw new Error(data.message || 'Something went wrong.');
-  }
-
-  return data;
-}

@@ -7,9 +7,8 @@ import Modal from '../ui/Modal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Save } from 'lucide-react';
-import { patchFormData } from '@/lib/api';
-import { toast } from '@/hooks/use-toast';
 
 const EditGroupModal: React.FC = () => {
   const { state, dispatch } = useAppContext();
@@ -18,12 +17,14 @@ const EditGroupModal: React.FC = () => {
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [mode, setMode] = useState('open');
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     if (group && isOpen) {
       setName(group.name);
       setDescription(group.description || '');
+      setMode(group.settings?.mode || 'open');
     }
   }, [group, isOpen]);
 
@@ -34,48 +35,27 @@ const EditGroupModal: React.FC = () => {
 
   if (!isOpen || !group) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
 
     setIsLoading(true);
 
-    try {
-      // Create FormData for multipart request
-      const formData = new FormData();
-      formData.append('name', name.trim());
-      formData.append('description', description.trim());
+    const updatedGroup = {
+      ...group,
+      name: name.trim(),
+      description: description.trim(),
+      settings: {
+        ...group.settings,
+        mode
+      }
+    };
 
-      console.log('[EditGroupModal] Updating group:', { groupId: group.id, name, description });
-
-      const { group: updatedGroupData } = await patchFormData<{ message: string; group: any }>(
-        `/groups/${group.id}/info`,
-        formData
-      );
-
-      console.log('[EditGroupModal] ✅ Update successful:', updatedGroupData);
-
-      const updatedGroup = {
-        ...group,
-        name: updatedGroupData.name,
-        description: updatedGroupData.description || '',
-        avatar: updatedGroupData.avatar || null,
-        settings: updatedGroupData.settings || group.settings,
-      };
-
+    setTimeout(() => {
       dispatch({ type: 'UPDATE_GROUP', payload: updatedGroup });
-      toast({ title: '✅ Success', description: `Group "${name}" updated successfully.`, type: 'success' });
+      dispatch({ type: 'ADD_TOAST', payload: { message: `✅ Group "${name}" updated`, type: 'success' } });
       handleClose();
-    } catch (err: unknown) {
-      console.error('[EditGroupModal] ❌ Error:', err);
-      toast({
-        title: '❌ Failed',
-        description: err instanceof Error ? err.message : 'Could not update group.',
-        type: 'error',
-      });
-    } finally {
-      setIsLoading(false);
-    }
+    }, 600);
   };
 
   return (
@@ -103,6 +83,20 @@ const EditGroupModal: React.FC = () => {
               className="rounded-xl border-border h-11"
               placeholder="What is this group for?"
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Messaging Mode</Label>
+            <Select value={mode} onValueChange={setMode}>
+              <SelectTrigger className="rounded-xl border-border h-11">
+                <SelectValue placeholder="Select mode" />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl">
+                <SelectItem value="open">Open (Everyone can message)</SelectItem>
+                <SelectItem value="readonly">Read Only (Admins only)</SelectItem>
+                <SelectItem value="announcement">Announcement (Restricted)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
