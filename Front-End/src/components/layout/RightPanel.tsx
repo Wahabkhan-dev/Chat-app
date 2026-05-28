@@ -192,6 +192,7 @@ const RightPanel: React.FC = () => {
   const isGroup = conversation.type === 'group';
   const group = isGroup ? state.groups.find(g => g.id === conversation.id) : null;
   const hasLeftGroup = isGroup && !!state.conversationMeta[conversation.id]?.leftAt;
+  const isMuted = !!state.conversationMeta[conversation.id]?.muted;
   const leftReason = state.conversationMeta[conversation.id]?.leftReason;
   const isAdmin = (uid: string) => group?.admins.includes(uid) || state.currentUser?.role === 'admin';
   const isMeAdmin = state.currentUser ? isAdmin(state.currentUser.id) : false;
@@ -593,10 +594,14 @@ const RightPanel: React.FC = () => {
                   <Button 
                     variant="outline" 
                     className="w-full gap-2 rounded-xl h-11 border-border" 
-                    onClick={() => dispatch({ type: group?.muted ? 'UNMUTE_CONVERSATION' : 'MUTE_CONVERSATION', payload: { conversationId: group!.id, muteUntil: null } })}
+                    onClick={() => dispatch(
+                      isMuted
+                        ? { type: 'UNMUTE_CONVERSATION', payload: group!.id }
+                        : { type: 'MUTE_CONVERSATION', payload: { conversationId: group!.id, muteUntil: null } }
+                    )}
                   >
-                    {group?.muted ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
-                    <span>{group?.muted ? 'Unmute Group' : 'Mute Notifications'}</span>
+                    {isMuted ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
+                    <span>{isMuted ? 'Unmute Group' : 'Mute Notifications'}</span>
                   </Button>
                 )}
                 {!hasLeftGroup && group?.ownerId !== state.currentUser?.id && (

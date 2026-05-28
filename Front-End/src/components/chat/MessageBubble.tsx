@@ -161,7 +161,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
   const renderContent = () => {
     if (isEditing) {
       return (
-        <div className="space-y-2 min-w-[280px] p-1 text-foreground">
+        <div className="space-y-2 w-full p-1 text-foreground">
           <Textarea 
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
@@ -231,7 +231,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
         </div>
       )}
       
-      <div className={cn('flex flex-col max-w-[75%]', isMe ? 'items-end' : 'items-start')}>
+      <div className={cn('flex flex-col', isEditing ? 'w-full' : 'max-w-[75%]', isMe ? 'items-end' : 'items-start')}>
         {isFirstInGroup && !isMe && state.activeConversation?.type === 'group' && (
           <span className="text-[10px] font-bold text-primary mb-1 uppercase tracking-widest ml-1">{sender?.name}</span>
         )}
