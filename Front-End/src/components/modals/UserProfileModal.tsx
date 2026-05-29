@@ -23,11 +23,11 @@ const UserProfileModal: React.FC = () => {
   };
 
   const handleMessage = () => {
-    const dmId = [state.currentUser?.id, user.id].sort().join('_');
-    dispatch({ 
-      type: 'SET_ACTIVE_CONVERSATION', 
-      payload: { type: 'dm', id: dmId, name: user.name, avatar: user.avatar } 
-    });
+    const a = Number(state.currentUser?.id);
+    const b = Number(user.id);
+    const dmId = `dm_${Math.min(a, b)}_${Math.max(a, b)}`;
+    dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type: 'dm', id: dmId, name: user.name, avatar: user.avatar } });
+    dispatch({ type: 'SET_ACTIVE_VIEW', payload: 'chat' });
     handleClose();
   };
 

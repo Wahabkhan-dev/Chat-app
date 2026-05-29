@@ -22,8 +22,16 @@ const TopBar: React.FC<{ onCreateUser: () => void }> = ({ onCreateUser }) => {
   }, [globalSearch, state.users, state.groups]);
 
   const handleSelectResult = (type: 'dm' | 'group', item: any) => {
-    const id = type === 'dm' ? [state.currentUser?.id, item.id].sort().join('_') : item.id;
+    let id: string;
+    if (type === 'dm') {
+      const a = Number(state.currentUser?.id);
+      const b = Number(item.id);
+      id = `dm_${Math.min(a, b)}_${Math.max(a, b)}`;
+    } else {
+      id = item.id;
+    }
     dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type, id, name: item.name, avatar: item.avatar || null } });
+    dispatch({ type: 'SET_ACTIVE_VIEW', payload: 'chat' });
     setGlobalSearch('');
     setShowSearchResults(false);
   };

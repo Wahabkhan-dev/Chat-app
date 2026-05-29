@@ -51,34 +51,28 @@ export function connectSocket(token: string): Socket {
   });
 
   socket.on('connect', () => {
-    console.log('[Socket] Connected:', socket?.id);
     _setSocketStatus('connected');
   });
 
   socket.on('disconnect', (reason) => {
-    console.log('[Socket] Disconnected:', reason);
     // 'io server disconnect' and 'io client disconnect' are intentional — don't show reconnecting
     const intentional = reason === 'io server disconnect' || reason === 'io client disconnect';
     _setSocketStatus(intentional ? 'disconnected' : 'reconnecting');
   });
 
-  socket.on('reconnect_attempt', (attempt) => {
-    console.log('[Socket] Reconnect attempt:', attempt);
+  socket.on('reconnect_attempt', () => {
     _setSocketStatus('reconnecting');
   });
 
   socket.on('reconnect', () => {
-    console.log('[Socket] Reconnected');
     _setSocketStatus('connected');
   });
 
   socket.on('reconnect_failed', () => {
-    console.warn('[Socket] Reconnect failed — all attempts exhausted');
     _setSocketStatus('disconnected');
   });
 
-  socket.on('connect_error', (err) => {
-    console.error('[Socket] Connection error:', err.message, err);
+  socket.on('connect_error', () => {
     _setSocketStatus('reconnecting');
   });
 

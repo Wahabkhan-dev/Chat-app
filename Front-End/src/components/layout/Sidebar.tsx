@@ -1,17 +1,17 @@
-﻿
+
 "use client";
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { useAppContext, ActiveConversation } from '@/context/AppContext';
+import { useAppContext } from '@/context/AppContext';
 import {
   Search, Plus, Settings, Shield, LogOut, FileText,
-  MessageSquare, Pin, BellOff, Trash2, Ban,
-  CheckCheck, Search as SearchIcon, VolumeX, Volume2, Lock, ShieldAlert, Camera, X
+  MessageSquare, Trash2, Ban,
+  CheckCheck, Search as SearchIcon, VolumeX, Volume2, Lock, Camera, X,
+  Star, ChevronDown, Users
 } from 'lucide-react';
 import { Avatar } from '../ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
 import { AppView } from '@/context/AppContext';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import Image from 'next/image';
@@ -29,20 +29,12 @@ function getDmConvId(id1: string | undefined, id2: string) {
   return `dm_${Math.min(a, b)}_${Math.max(a, b)}`;
 }
 
-const GroupAvatar: React.FC<{ name: string; avatar?: string | null; hasLeft?: boolean; isActive?: boolean }> = ({ name, avatar, hasLeft, isActive }) => {
+const GroupAvatar: React.FC<{ name: string; avatar?: string | null; hasLeft?: boolean }> = ({ name, avatar, hasLeft }) => {
   const isR2Key = typeof avatar === 'string' && avatar.startsWith('group-avatars/');
   const { url: resolvedUrl } = useSignedUrl(isR2Key ? avatar : undefined);
-
   if (resolvedUrl) {
-    return (
-      <img
-        src={resolvedUrl}
-        alt={name}
-        className={cn('h-10 w-10 rounded-xl object-cover shrink-0 shadow-sm transition-transform', !hasLeft && 'group-hover:scale-105')}
-      />
-    );
+    return <img src={resolvedUrl} alt={name} className={cn('h-10 w-10 rounded-xl object-cover shrink-0 shadow-sm transition-transform', !hasLeft && 'group-hover:scale-105')} />;
   }
-
   return (
     <div className={cn('h-10 w-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm font-bold text-white transition-transform', hasLeft ? 'bg-muted-foreground/40' : 'bg-secondary group-hover:scale-105')}>
       {name[0]}
@@ -50,14 +42,43 @@ const GroupAvatar: React.FC<{ name: string; avatar?: string | null; hasLeft?: bo
   );
 };
 
-const ContextMenu: React.FC<{ 
-  x: number; 
-  y: number; 
-  onClose: () => void; 
+const SectionHeader: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  count?: number;
+  open: boolean;
+  onToggle: () => void;
+  action?: React.ReactNode;
+}> = ({ icon, label, count, open, onToggle, action }) => (
+  <div className="flex items-center gap-1 px-0.5 pt-4 pb-1">
+    <button
+      onClick={onToggle}
+      className="flex-1 flex items-center gap-2 py-1.5 px-2.5 rounded-lg bg-muted/30 hover:bg-muted/60 transition-colors group/sh"
+    >
+      <span className="text-primary/50 shrink-0">{icon}</span>
+      <span className="flex-1 text-left text-[10px] font-extrabold tracking-[0.15em] uppercase text-muted-foreground/80 group-hover/sh:text-foreground transition-colors">
+        {label}
+        {typeof count === 'number' && count > 0 && (
+          <span className="ml-2 text-[9px] font-normal opacity-40">{count}</span>
+        )}
+      </span>
+      <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground/50 shrink-0 transition-transform duration-200', !open && '-rotate-90')} />
+    </button>
+    {action}
+  </div>
+);
+
+const ContextMenu: React.FC<{
+  x: number;
+  y: number;
+  onClose: () => void;
   type: 'dm' | 'group';
   convId: string;
   convName: string;
-}> = ({ x, y, onClose, type, convId, convName }) => {
+  isFavourite: boolean;
+  onToggleFavourite: () => void;
+  hasHistory: boolean;
+}> = ({ x, y, onClose, type, convId, convName, isFavourite, onToggleFavourite, hasHistory }) => {
   const { state, dispatch } = useAppContext();
   const meta = state.conversationMeta[convId] || { muted: false, pinned: false, unreadCount: 0, blocked: false };
   const [showMuteSubmenu, setShowMuteSubmenu] = useState(false);
@@ -65,13 +86,11 @@ const ContextMenu: React.FC<{
   const handleBlockChange = async (shouldBlock: boolean) => {
     try {
       const success = await setConversationBlockStatus(convId, shouldBlock);
-      if (!success) throw new Error('Unable to update block status');
-
+      if (!success) throw new Error();
       dispatch({ type: shouldBlock ? 'BLOCK_USER' : 'UNBLOCK_USER', payload: convId });
       emitConversationMetadataChanged(convId, shouldBlock ? 'block' : 'unblock', shouldBlock);
-      dispatch({ type: 'ADD_TOAST', payload: { message: shouldBlock ? `${convName} has been blocked.` : `${convName} is now unblocked.`, type: 'success' } });
-    } catch (error) {
-      console.error('[Sidebar] Block state update failed:', error);
+      dispatch({ type: 'ADD_TOAST', payload: { message: shouldBlock ? `${convName} blocked.` : `${convName} unblocked.`, type: 'success' } });
+    } catch {
       dispatch({ type: 'ADD_TOAST', payload: { message: `Failed to ${shouldBlock ? 'block' : 'unblock'} ${convName}.`, type: 'error' } });
     }
   };
@@ -84,8 +103,8 @@ const ContextMenu: React.FC<{
         data: {
           title: shouldBlock ? `Block ${convName}?` : `Unblock ${convName}?`,
           body: shouldBlock
-            ? `Blocking ${convName} will prevent them from sending new direct messages or notifications to you.`
-            : `Unblocking ${convName} will restore normal direct messaging and notifications from them.`,
+            ? `Blocking ${convName} will prevent them from sending new messages or notifications to you.`
+            : `Unblocking ${convName} will restore normal messaging.`,
           confirmLabel: shouldBlock ? 'Block' : 'Unblock',
           confirmStyle: shouldBlock ? 'danger' : 'default',
           onConfirm: () => handleBlockChange(shouldBlock),
@@ -98,114 +117,147 @@ const ContextMenu: React.FC<{
   const handleMute = (hours: number | 'forever') => {
     const muteUntil = hours === 'forever' ? null : new Date(Date.now() + hours * 3600000).toISOString();
     dispatch({ type: 'MUTE_CONVERSATION', payload: { conversationId: convId, muteUntil } });
-    dispatch({
-      type: 'ADD_TOAST',
-      payload: {
-        message: `🔇 ${convName} muted ${hours === 'forever' ? 'until you turn it back on' : `for ${hours} hour${hours > 1 ? 's' : ''}`}`,
-        type: 'info',
-      },
-    });
+    dispatch({ type: 'ADD_TOAST', payload: { message: `🔇 ${convName} muted ${hours === 'forever' ? 'until you turn it back on' : `for ${hours}h`}`, type: 'info' } });
     onClose();
   };
 
-  const isGroupCreator = type === 'group' && state.groups.find(g => g.id === convId)?.createdBy === state.currentUser?.id;
   const isSiteAdmin = state.currentUser?.role === 'admin';
-
-  // Adjust menu position to stay within viewport
-  const menuX = x + 200 > window.innerWidth ? x - 200 : x;
-  const menuY = y + 300 > window.innerHeight ? y - 300 : y;
+  const menuW = 210;
+  const menuH = hasHistory ? 380 : 120;
+  const menuX = x + menuW > window.innerWidth ? x - menuW : x;
+  const menuY = y + menuH > window.innerHeight ? y - menuH : y;
 
   return (
-    <div 
-      className="fixed z-[var(--z-modal)] bg-card border border-border shadow-2xl py-1.5 min-w-[200px] animate-in zoom-in-95 duration-150 rounded-xl"
+    <div
+      className="fixed z-[var(--z-modal)] bg-card border border-border shadow-2xl py-1.5 min-w-[210px] animate-in zoom-in-95 duration-150 rounded-xl"
       style={{ left: menuX, top: menuY }}
       onClick={e => e.stopPropagation()}
     >
-      <button onClick={() => { dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type, id: convId, name: convName, avatar: null } }); onClose(); }} className="w-full px-3 py-2 text-left text-xs font-semibold hover:bg-muted flex items-center gap-3 transition-colors">
+      <button
+        onClick={() => { dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type, id: convId, name: convName, avatar: null } }); onClose(); }}
+        className="w-full px-3 py-2 text-left text-xs font-semibold hover:bg-muted flex items-center gap-3 transition-colors"
+      >
         <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
         Open {type === 'group' ? 'Group' : 'Conversation'}
       </button>
-      
-      <div className="h-px bg-border my-1" />
-
-      <button onClick={() => { dispatch({ type: meta.pinned ? 'UNPIN_CONVERSATION' : 'PIN_CONVERSATION', payload: convId }); onClose(); }} className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted flex items-center justify-between transition-colors">
-        <div className="flex items-center gap-3">
-          <Pin className="h-3.5 w-3.5 text-muted-foreground" />
-          {meta.pinned ? 'Unpin' : 'Pin Conversation'}
-        </div>
-        {!meta.pinned && state.conversationMeta && Object.values(state.conversationMeta).filter(m => m.pinned).length >= 5 && (
-           <span className="text-[10px] text-destructive font-bold">MAX 5</span>
-        )}
-      </button>
-
-      <div className="relative group/mute">
-        <button 
-          onMouseEnter={() => setShowMuteSubmenu(true)}
-          onClick={() => meta.muted && dispatch({ type: 'UNMUTE_CONVERSATION', payload: convId })}
-          className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted flex items-center justify-between transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            {meta.muted ? <Volume2 className="h-3.5 w-3.5 text-primary" /> : <VolumeX className="h-3.5 w-3.5 text-muted-foreground" />}
-            {meta.muted ? 'Unmute Notifications' : 'Mute Notifications'}
-          </div>
-          {!meta.muted && <span className="text-[10px] text-muted-foreground">â€º</span>}
-        </button>
-
-        {showMuteSubmenu && !meta.muted && (
-          <div className="absolute left-full top-0 ml-1 bg-card border border-border shadow-2xl py-1.5 min-w-[160px] rounded-xl animate-in fade-in slide-in-from-left-2">
-            {[1, 8, 24].map(h => (
-              <button key={h} onClick={() => handleMute(h)} className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted transition-colors">For {h} hour{h > 1 ? 's' : ''}</button>
-            ))}
-            <button onClick={() => handleMute('forever')} className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted transition-colors">Until I turn it back on</button>
-          </div>
-        )}
-      </div>
 
       <div className="h-px bg-border my-1" />
 
-      <button onClick={() => { dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type, id: convId, name: convName, avatar: null } }); dispatch({ type: 'SET_RIGHT_PANEL_TAB', payload: 'files' }); dispatch({ type: 'TOGGLE_RIGHT_PANEL', payload: true }); onClose(); }} className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted flex items-center gap-3 transition-colors">
-        <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-        View Shared Files
+      <button
+        onClick={() => { onToggleFavourite(); onClose(); }}
+        className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted flex items-center gap-3 transition-colors"
+      >
+        <Star className={cn('h-3.5 w-3.5', isFavourite ? 'fill-yellow-400 text-yellow-400' : 'text-muted-foreground')} />
+        {isFavourite ? 'Remove from Favourites' : 'Add to Favourites'}
       </button>
 
-      <button onClick={() => { dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type, id: convId, name: convName, avatar: null } }); dispatch({ type: 'SET_CHAT_SEARCH', payload: { active: true, query: '' } }); onClose(); }} className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted flex items-center gap-3 transition-colors">
-        <SearchIcon className="h-3.5 w-3.5 text-muted-foreground" />
-        Search in Conversation
-      </button>
-
-      <div className="h-px bg-border my-1" />
-
-      <button onClick={() => { dispatch({ type: meta.unreadCount > 0 ? 'MARK_CONVERSATION_READ' : 'MARK_CONVERSATION_UNREAD', payload: convId }); onClose(); }} className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted flex items-center gap-3 transition-colors">
-        <CheckCheck className="h-3.5 w-3.5 text-muted-foreground" />
-        Mark as {meta.unreadCount > 0 ? 'Read' : 'Unread'}
-      </button>
-
-      {type === 'dm' ? (
+      {hasHistory && (
         <>
           <div className="h-px bg-border my-1" />
-          <button onClick={() => openBlockConfirm(!meta.blocked)} className="w-full px-3 py-2 text-left text-xs font-medium text-destructive hover:bg-destructive/10 flex items-center gap-3 transition-colors">
-            <Ban className="h-3.5 w-3.5" />
-            {meta.blocked ? 'Unblock User' : 'Block User'}
-          </button>
-          {isSiteAdmin && (
-            <button onClick={() => dispatch({ type: 'ADD_TOAST', payload: { message: 'Use Admin Control to delete conversations', type: 'info' } })} className="w-full px-3 py-2 text-left text-xs font-medium text-destructive hover:bg-destructive/10 flex items-center gap-3 transition-colors">
-              <Trash2 className="h-3.5 w-3.5" />
-              Delete Conversation
+
+          <div className="relative" onMouseLeave={() => setShowMuteSubmenu(false)}>
+            <button
+              onMouseEnter={() => setShowMuteSubmenu(true)}
+              onClick={() => { if (meta.muted) { dispatch({ type: 'UNMUTE_CONVERSATION', payload: convId }); onClose(); } }}
+              className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted flex items-center justify-between transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                {meta.muted ? <Volume2 className="h-3.5 w-3.5 text-primary" /> : <VolumeX className="h-3.5 w-3.5 text-muted-foreground" />}
+                {meta.muted ? 'Unmute Notifications' : 'Mute Notifications'}
+              </div>
+              {!meta.muted && <span className="text-[10px] text-muted-foreground">›</span>}
             </button>
-          )}
-        </>
-      ) : (
-        <>
+            {showMuteSubmenu && !meta.muted && (
+              <div className="absolute left-full top-0 ml-1 bg-card border border-border shadow-2xl py-1.5 min-w-[160px] rounded-xl animate-in fade-in slide-in-from-left-2 z-10">
+                {[1, 8, 24].map(h => (
+                  <button key={h} onClick={() => handleMute(h)} className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted transition-colors">
+                    For {h} hour{h > 1 ? 's' : ''}
+                  </button>
+                ))}
+                <button onClick={() => handleMute('forever')} className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted transition-colors">
+                  Until I turn it back on
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="h-px bg-border my-1" />
-          <button onClick={() => dispatch({ type: 'OPEN_MODAL', payload: { type: 'leaveGroup', data: { group: state.groups.find(g => g.id === convId) } } })} className="w-full px-3 py-2 text-left text-xs font-medium text-destructive hover:bg-destructive/10 flex items-center gap-3 transition-colors">
-            <LogOut className="h-3.5 w-3.5" />
-            Leave Group
+
+          <button
+            onClick={() => { dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type, id: convId, name: convName, avatar: null } }); dispatch({ type: 'SET_RIGHT_PANEL_TAB', payload: 'files' }); dispatch({ type: 'TOGGLE_RIGHT_PANEL', payload: true }); onClose(); }}
+            className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted flex items-center gap-3 transition-colors"
+          >
+            <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+            View Shared Files
           </button>
-          {isSiteAdmin && (
-            <button onClick={() => dispatch({ type: 'OPEN_MODAL', payload: { type: 'confirm', data: { title: 'Delete Group', body: `Permanently delete "${convName}"?`, confirmLabel: 'Delete Permanently', confirmStyle: 'danger', onConfirm: async () => { try { await api.delete(`/groups/${convId}`); dispatch({ type: 'DELETE_GROUP', payload: convId }); } catch { dispatch({ type: 'ADD_TOAST', payload: { message: 'Failed to delete group', type: 'error' } }); } } } } })} className="w-full px-3 py-2 text-left text-xs font-medium text-destructive hover:bg-destructive/10 flex items-center gap-3 transition-colors">
-              <Trash2 className="h-3.5 w-3.5" />
-              Delete Group
-            </button>
+
+          <button
+            onClick={() => { dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type, id: convId, name: convName, avatar: null } }); dispatch({ type: 'SET_CHAT_SEARCH', payload: { active: true, query: '' } }); onClose(); }}
+            className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted flex items-center gap-3 transition-colors"
+          >
+            <SearchIcon className="h-3.5 w-3.5 text-muted-foreground" />
+            Search in Conversation
+          </button>
+
+          <div className="h-px bg-border my-1" />
+
+          <button
+            onClick={() => { dispatch({ type: meta.unreadCount > 0 ? 'MARK_CONVERSATION_READ' : 'MARK_CONVERSATION_UNREAD', payload: convId }); onClose(); }}
+            className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted flex items-center gap-3 transition-colors"
+          >
+            <CheckCheck className="h-3.5 w-3.5 text-muted-foreground" />
+            Mark as {meta.unreadCount > 0 ? 'Read' : 'Unread'}
+          </button>
+
+          {type === 'dm' ? (
+            <>
+              <div className="h-px bg-border my-1" />
+              <button onClick={() => openBlockConfirm(!meta.blocked)} className="w-full px-3 py-2 text-left text-xs font-medium text-destructive hover:bg-destructive/10 flex items-center gap-3 transition-colors">
+                <Ban className="h-3.5 w-3.5" />
+                {meta.blocked ? 'Unblock User' : 'Block User'}
+              </button>
+              {isSiteAdmin && (
+                <button onClick={() => { dispatch({ type: 'ADD_TOAST', payload: { message: 'Use Admin Control to delete conversations', type: 'info' } }); onClose(); }} className="w-full px-3 py-2 text-left text-xs font-medium text-destructive hover:bg-destructive/10 flex items-center gap-3 transition-colors">
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete Conversation
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="h-px bg-border my-1" />
+              <button onClick={() => { dispatch({ type: 'OPEN_MODAL', payload: { type: 'leaveGroup', data: { group: state.groups.find(g => g.id === convId) } } }); onClose(); }} className="w-full px-3 py-2 text-left text-xs font-medium text-destructive hover:bg-destructive/10 flex items-center gap-3 transition-colors">
+                <LogOut className="h-3.5 w-3.5" />
+                Leave Group
+              </button>
+              {isSiteAdmin && (
+                <button
+                  onClick={() => {
+                    dispatch({
+                      type: 'OPEN_MODAL',
+                      payload: {
+                        type: 'confirm',
+                        data: {
+                          title: 'Delete Group',
+                          body: `Permanently delete "${convName}"?`,
+                          confirmLabel: 'Delete Permanently',
+                          confirmStyle: 'danger',
+                          onConfirm: async () => {
+                            try { await api.delete(`/groups/${convId}`); dispatch({ type: 'DELETE_GROUP', payload: convId }); }
+                            catch { dispatch({ type: 'ADD_TOAST', payload: { message: 'Failed to delete group', type: 'error' } }); }
+                          },
+                        },
+                      },
+                    });
+                    onClose();
+                  }}
+                  className="w-full px-3 py-2 text-left text-xs font-medium text-destructive hover:bg-destructive/10 flex items-center gap-3 transition-colors"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete Group
+                </button>
+              )}
+            </>
           )}
         </>
       )}
@@ -220,11 +272,23 @@ const Sidebar: React.FC<{
   onConversationSelect?: () => void;
 }> = ({ onViewChange, onCreateGroup, activeView, onConversationSelect }) => {
   const { state, dispatch } = useAppContext();
-  const [activeTab, setActiveTab] = useState<'dm' | 'groups'>('dm');
-  const [sidebarSearch, setSidebarSearch] = useState('');
-  const [ctxMenu, setCtxMenu] = useState<{ x: number, y: number, id: string, name: string, type: 'dm' | 'group' } | null>(null);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [mobileSearchQuery, setMobileSearchQuery] = useState('');
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; id: string; name: string; type: 'dm' | 'group'; hasHistory: boolean } | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [activeTab, setActiveTab] = useState<'chats' | 'groups'>('chats');
+  const [openSections, setOpenSections] = useState({ favourites: true, chats: true, users: true });
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const mobileSearchRef = useRef<HTMLInputElement>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressPos = useRef<{ x: number; y: number } | null>(null);
+
+  const currentUserId = String(state.currentUser?.id || '');
+
+  // Favourites = pinned conversations (uses existing persisted conversationMeta)
+  const isFavourite = (convId: string) => !!(state.conversationMeta[convId]?.pinned);
+  const toggleFavourite = (convId: string) =>
+    dispatch({ type: isFavourite(convId) ? 'UNPIN_CONVERSATION' : 'PIN_CONVERSATION', payload: convId });
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -251,236 +315,425 @@ const Sidebar: React.FC<{
     }
   };
 
-  const filteredUsers = useMemo(() => {
-    return state.users
+  // --- Compute lists ---
+
+  const otherActiveUsers = useMemo(() =>
+    state.users.filter(u => u.id !== currentUserId && u.isActive !== false),
+    [state.users, currentUserId]);
+
+  const byRecency = (a: string, b: string) => {
+    const aT = state.conversationMeta[a]?.lastMessage?.timestamp;
+    const bT = state.conversationMeta[b]?.lastMessage?.timestamp;
+    return (bT ? new Date(bT).getTime() : 0) - (aT ? new Date(aT).getTime() : 0);
+  };
+
+  // Favourites section: any DM (with or without history) whose convId is pinned
+  const favouriteItems = useMemo(() =>
+    otherActiveUsers
+      .filter(u => isFavourite(getDmConvId(currentUserId, u.id)))
+      .map(u => ({ kind: 'dm' as const, convId: getDmConvId(currentUserId, u.id), user: u }))
+      .sort((a, b) => byRecency(a.convId, b.convId)),
+    [otherActiveUsers, state.conversationMeta, currentUserId]);
+
+  // Chats section: DMs with history, NOT pinned
+  const chatItems = useMemo(() =>
+    otherActiveUsers
       .filter(u => {
-        if (u.id === state.currentUser?.id) return false;
-        if (!u.name.toLowerCase().includes(sidebarSearch.toLowerCase())) return false;
-        return true;
+        const convId = getDmConvId(currentUserId, u.id);
+        const meta = state.conversationMeta[convId];
+        return !!meta?.lastMessage && !meta.pinned;
       })
-      .sort((a, b) => {
-        const aId = getDmConvId(state.currentUser?.id, a.id);
-        const bId = getDmConvId(state.currentUser?.id, b.id);
-        const aMeta = state.conversationMeta[aId];
-        const bMeta = state.conversationMeta[bId];
-        if (aMeta?.pinned && !bMeta?.pinned) return -1;
-        if (!aMeta?.pinned && bMeta?.pinned) return 1;
-        const aTime = aMeta?.lastMessage?.timestamp ? new Date(aMeta.lastMessage.timestamp).getTime() : 0;
-        const bTime = bMeta?.lastMessage?.timestamp ? new Date(bMeta.lastMessage.timestamp).getTime() : 0;
-        return bTime - aTime;
-      });
-  }, [state.users, state.currentUser, sidebarSearch, state.conversationMeta]);
+      .map(u => ({ kind: 'dm' as const, convId: getDmConvId(currentUserId, u.id), user: u }))
+      .sort((a, b) => byRecency(a.convId, b.convId)),
+    [otherActiveUsers, state.conversationMeta, currentUserId]);
 
-  const filteredGroups = useMemo(() => {
-    const currentUserId = String(state.currentUser?.id || '');
-    return state.groups
-      .filter(g => {
-        if (!g.name.toLowerCase().includes(sidebarSearch.toLowerCase())) return false;
-        const isMember = g.members.includes(currentUserId);
-        const hasLeft = !!(state.conversationMeta[g.id]?.leftAt);
-        return isMember || hasLeft;
+  // All groups (for Groups tab) — favourited groups sort to top
+  const sortedGroups = useMemo(() =>
+    state.groups
+      .filter(g => g.members.includes(currentUserId) || !!state.conversationMeta[g.id]?.leftAt)
+      .sort((a, b) => {
+        const aFav = isFavourite(a.id), bFav = isFavourite(b.id);
+        if (aFav && !bFav) return -1;
+        if (!aFav && bFav) return 1;
+        return byRecency(a.id, b.id);
+      }),
+    [state.groups, state.conversationMeta, currentUserId]);
+
+  // Users section: no DM history and NOT pinned (pinned ones are in Favourites)
+  const userItems = useMemo(() =>
+    otherActiveUsers
+      .filter(u => {
+        const convId = getDmConvId(currentUserId, u.id);
+        const meta = state.conversationMeta[convId];
+        return !meta?.lastMessage && !meta?.pinned;
       })
-      .sort((a, b) => {
-        const aMeta = state.conversationMeta[a.id];
-        const bMeta = state.conversationMeta[b.id];
-        if (aMeta?.pinned && !bMeta?.pinned) return -1;
-        if (!aMeta?.pinned && bMeta?.pinned) return 1;
-        const aTime = aMeta?.lastMessage?.timestamp ? new Date(aMeta.lastMessage.timestamp).getTime() : 0;
-        const bTime = bMeta?.lastMessage?.timestamp ? new Date(bMeta.lastMessage.timestamp).getTime() : 0;
-        return bTime - aTime;
-      });
-  }, [state.groups, state.currentUser, sidebarSearch, state.conversationMeta]);
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [otherActiveUsers, state.conversationMeta, currentUserId]);
 
-  const handleContextMenu = (e: React.MouseEvent, id: string, name: string, type: 'dm' | 'group') => {
+  // Mobile search results (People + Groups)
+  const mobileSearchResults = useMemo(() => {
+    if (mobileSearchQuery.length < 1) return null;
+    const mq = mobileSearchQuery.toLowerCase();
+    return {
+      people: state.users.filter(u => u.id !== currentUserId && u.name.toLowerCase().includes(mq)),
+      groups: state.groups.filter(g => g.members.includes(currentUserId) && g.name.toLowerCase().includes(mq)),
+    };
+  }, [mobileSearchQuery, state.users, state.groups, currentUserId]);
+
+  const handleMobileSearchSelect = (type: 'dm' | 'group', item: any) => {
+    const convId = type === 'dm' ? getDmConvId(currentUserId, item.id) : item.id;
+    dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type, id: convId, name: item.name, avatar: item.avatar || null } });
+    if (type === 'dm') getSocket()?.emit('join_dm', { otherUserId: item.id });
+    setMobileSearchOpen(false);
+    setMobileSearchQuery('');
+    onConversationSelect?.();
+  };
+
+  // Context menu
+  const openCtxMenu = (e: React.MouseEvent, id: string, name: string, type: 'dm' | 'group', hasHistory: boolean) => {
     e.preventDefault();
-    setCtxMenu({ x: e.clientX, y: e.clientY, id, name, type });
+    setCtxMenu({ x: e.clientX, y: e.clientY, id, name, type, hasHistory });
+  };
+
+  // Long-press (mobile)
+  const startLongPress = (id: string, name: string, type: 'dm' | 'group', hasHistory: boolean) =>
+    (e: React.PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      longPressPos.current = { x: e.clientX, y: e.clientY };
+      longPressTimer.current = setTimeout(() => {
+        if (longPressPos.current) {
+          setCtxMenu({ x: longPressPos.current.x, y: longPressPos.current.y, id, name, type, hasHistory });
+        }
+      }, 600);
+    };
+
+  const cancelLongPress = () => {
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+    longPressPos.current = null;
+  };
+
+  const onLongPressMove = (e: React.PointerEvent) => {
+    if (!longPressPos.current) return;
+    if (Math.abs(e.clientX - longPressPos.current.x) > 8 || Math.abs(e.clientY - longPressPos.current.y) > 8) cancelLongPress();
+  };
+
+  // --- Item renderers ---
+
+  const renderDmItem = (item: { kind: 'dm'; convId: string; user: any }) => {
+    const { convId, user } = item;
+    const meta = state.conversationMeta[convId] || { pinned: false, muted: false, unreadCount: 0 };
+    const isActive = state.activeConversation?.id === convId;
+    const isDeactivated = user.isActive === false;
+    return (
+      <button
+        key={convId}
+        onContextMenu={e => !isDeactivated && openCtxMenu(e, convId, user.name, 'dm', true)}
+        onPointerDown={!isDeactivated ? startLongPress(convId, user.name, 'dm', true) : undefined}
+        onPointerUp={cancelLongPress}
+        onPointerLeave={cancelLongPress}
+        onPointerMove={onLongPressMove}
+        onClick={() => {
+          dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type: 'dm', id: convId, name: user.name, avatar: user.avatar } });
+          if (!isDeactivated) getSocket()?.emit('join_dm', { otherUserId: user.id });
+          onConversationSelect?.();
+        }}
+        className={cn(
+          'w-full flex items-center gap-3 p-2.5 rounded-xl transition-all group border border-transparent relative',
+          isDeactivated ? 'opacity-50 cursor-default' : isActive ? 'bg-primary/5 text-primary border-primary/10' : 'hover:bg-muted text-muted-foreground'
+        )}
+      >
+        <div className="relative">
+          <Avatar name={user.name} src={user.avatar} size="md" status={isDeactivated ? undefined : user.status} showStatus={!isDeactivated} className={isDeactivated ? 'grayscale' : ''} />
+          {meta.muted && !isDeactivated && (
+            <div className="absolute -bottom-1 -right-1 bg-card rounded-full p-0.5 shadow-sm border border-border">
+              <VolumeX className="h-2.5 w-2.5 text-muted-foreground" />
+            </div>
+          )}
+        </div>
+        <div className="flex-1 text-left min-w-0">
+          <div className="flex items-center gap-1">
+            <p className={cn('text-sm truncate transition-colors', !isActive && meta.unreadCount > 0 && !meta.muted ? 'font-bold text-foreground group-hover:text-primary' : 'font-semibold group-hover:text-primary')}>{user.name}</p>
+            {meta.blocked && !isDeactivated && <Ban className="h-2.5 w-2.5 text-destructive shrink-0" />}
+          </div>
+          {isDeactivated ? (
+            <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-tighter">Deactivated</p>
+          ) : meta.lastMessage ? (
+            <p className={cn('text-[11px] truncate', !isActive && meta.unreadCount > 0 && !meta.muted ? 'text-foreground font-semibold' : 'text-muted-foreground')}>
+              {String(meta.lastMessage.senderId) === currentUserId ? 'You: ' : ''}{meta.lastMessage.content || '📎 Attachment'}
+            </p>
+          ) : (
+            <p className="text-[10px] text-muted-foreground truncate font-bold uppercase tracking-tighter">{user.department}</p>
+          )}
+        </div>
+        {!isDeactivated && meta.unreadCount > 0 && (
+          <Badge className={cn('h-5 px-1.5 font-bold rounded-lg', meta.muted ? 'bg-muted-foreground/30 text-white' : 'bg-secondary text-white')}>
+            {meta.unreadCount}
+          </Badge>
+        )}
+      </button>
+    );
+  };
+
+  const renderGroupItem = (item: { kind: 'group'; convId: string; group: any }) => {
+    const { group } = item;
+    const meta = state.conversationMeta[group.id] || { pinned: false, muted: false, unreadCount: 0, hasUnreadMention: false };
+    const isActive = state.activeConversation?.id === group.id;
+    const isAdminOnly = group.settings?.messagePermission === 'admin_only';
+    const hasLeft = !!meta.leftAt;
+    return (
+      <button
+        key={group.id}
+        onContextMenu={e => !hasLeft && openCtxMenu(e, group.id, group.name, 'group', true)}
+        onPointerDown={!hasLeft ? startLongPress(group.id, group.name, 'group', true) : undefined}
+        onPointerUp={cancelLongPress}
+        onPointerLeave={cancelLongPress}
+        onPointerMove={onLongPressMove}
+        onClick={() => { dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type: 'group', id: group.id, name: group.name, avatar: group.avatar } }); onConversationSelect?.(); }}
+        className={cn(
+          'w-full flex items-center gap-3 p-2.5 rounded-xl transition-all group border border-transparent relative',
+          hasLeft ? 'opacity-50' : isActive ? 'bg-primary/5 text-primary border-primary/10' : 'hover:bg-muted text-muted-foreground'
+        )}
+      >
+        <div className="relative">
+          <GroupAvatar name={group.name} avatar={group.avatar} hasLeft={hasLeft} />
+          {meta.muted && !hasLeft && (
+            <div className="absolute -bottom-1 -right-1 bg-card rounded-full p-0.5 shadow-sm border border-border">
+              <VolumeX className="h-2.5 w-2.5 text-muted-foreground" />
+            </div>
+          )}
+        </div>
+        <div className="flex-1 text-left min-w-0">
+          <div className="flex items-center gap-1.5">
+            <p className={cn('text-sm truncate transition-colors', hasLeft ? 'text-muted-foreground font-semibold' : !isActive && (meta.unreadCount > 0 || meta.hasUnreadMention) && !meta.muted ? 'font-bold text-foreground group-hover:text-primary' : 'font-semibold group-hover:text-primary')}>
+              {group.name}
+            </p>
+            {meta.pinned && !hasLeft && <Star className="h-2.5 w-2.5 fill-yellow-400 text-yellow-400 shrink-0" />}
+            {isAdminOnly && !hasLeft && <Lock className="h-2.5 w-2.5 text-muted-foreground/40 shrink-0" />}
+            {hasLeft && <LogOut className="h-2.5 w-2.5 text-muted-foreground/50 shrink-0" />}
+          </div>
+          {hasLeft ? (
+            <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-tighter">You left this group</p>
+          ) : meta.lastMessage ? (
+            <p className={cn('text-[11px] truncate', !isActive && (meta.unreadCount > 0 || meta.hasUnreadMention) && !meta.muted ? 'text-foreground font-semibold' : 'text-muted-foreground')}>
+              {meta.lastMessage.senderId === state.currentUser?.id
+                ? 'You: '
+                : `${state.users.find(u => u.id === meta.lastMessage!.senderId)?.name?.split(' ')[0] || ''}: `
+              }{meta.lastMessage.content || '📎 Attachment'}
+            </p>
+          ) : (
+            <p className="text-[10px] text-muted-foreground truncate font-bold uppercase tracking-tighter">{group.members.length} members</p>
+          )}
+        </div>
+        {hasLeft ? (
+          <div
+            role="button"
+            tabIndex={0}
+            className="p-1 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors shrink-0"
+            onClick={async e => {
+              e.stopPropagation();
+              try { await api.delete(`/groups/${group.id}/leave/dismiss`); } catch { /* ignore */ }
+              dispatch({ type: 'DISMISS_LEFT_GROUP', payload: group.id });
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault(); e.stopPropagation();
+                api.delete(`/groups/${group.id}/leave/dismiss`).catch(() => {});
+                dispatch({ type: 'DISMISS_LEFT_GROUP', payload: group.id });
+              }
+            }}
+          >
+            <X className="h-3.5 w-3.5" />
+          </div>
+        ) : meta.hasUnreadMention ? (
+          <Badge className="h-5 px-1.5 bg-secondary text-white font-bold rounded-lg animate-pulse">@</Badge>
+        ) : meta.unreadCount > 0 ? (
+          <Badge className={cn('h-5 px-1.5 font-bold rounded-lg', meta.muted ? 'bg-muted-foreground/30 text-white' : 'bg-muted-foreground text-white')}>
+            {meta.unreadCount}
+          </Badge>
+        ) : null}
+      </button>
+    );
+  };
+
+  const renderUserItem = (user: any) => {
+    const convId = getDmConvId(currentUserId, user.id);
+    const isActive = state.activeConversation?.id === convId;
+    return (
+      <button
+        key={user.id}
+        onContextMenu={e => openCtxMenu(e, convId, user.name, 'dm', false)}
+        onPointerDown={startLongPress(convId, user.name, 'dm', false)}
+        onPointerUp={cancelLongPress}
+        onPointerLeave={cancelLongPress}
+        onPointerMove={onLongPressMove}
+        onClick={() => {
+          dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type: 'dm', id: convId, name: user.name, avatar: user.avatar } });
+          getSocket()?.emit('join_dm', { otherUserId: user.id });
+          onConversationSelect?.();
+        }}
+        className={cn(
+          'w-full flex items-center gap-3 p-2.5 rounded-xl transition-all group border border-transparent',
+          isActive ? 'bg-primary/5 text-primary border-primary/10' : 'hover:bg-muted text-muted-foreground'
+        )}
+      >
+        <Avatar name={user.name} src={user.avatar} size="md" status={user.status} showStatus />
+        <div className="flex-1 text-left min-w-0">
+          <p className="text-sm font-semibold truncate group-hover:text-primary transition-colors">{user.name}</p>
+          <p className="text-[10px] text-muted-foreground truncate font-bold uppercase tracking-tighter">{user.department || 'Team Member'}</p>
+        </div>
+      </button>
+    );
   };
 
   return (
     <div className="w-full h-full bg-card text-card-foreground flex flex-col relative z-20 shadow-xl overflow-hidden">
+
+      {/* Header */}
       <div className="p-5 border-b border-border bg-card/50">
-        <div className="flex items-center gap-3 mb-5">
+        <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-2xl relative overflow-hidden shrink-0 bg-transparent">
             <Image src={BRAND_FAVICON_URL} alt="Mawby Teams icon" fill className="object-contain p-2" />
           </div>
           <div className="flex flex-col min-w-0">
             <span className="font-bold text-sm font-headline truncate tracking-tight">Mawby Teams</span>
-            {state.currentUser?.role === 'admin' && <Badge variant="default" className="w-fit text-[9px] h-3.5 bg-primary px-1 font-bold rounded-sm mt-0.5">WORKSPACE ADMIN</Badge>}
+            {state.currentUser?.role === 'admin' && (
+              <Badge variant="default" className="w-fit text-[9px] h-3.5 bg-primary px-1 font-bold rounded-sm mt-0.5">WORKSPACE ADMIN</Badge>
+            )}
           </div>
-          <NotificationBell className="ml-auto shrink-0 md:hidden" />
-        </div>
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60" />
-          <input type="text" placeholder="Jump to..." className="w-full pl-9 pr-3 py-2.5 bg-muted/40 border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all font-medium" value={sidebarSearch} onChange={e => setSidebarSearch(e.target.value)} />
-        </div>
-      </div>
-
-      {/* View switcher — desktop only. Mobile uses the bottom nav */}
-      <div className="hidden md:block p-3 border-b border-border space-y-1 bg-muted/5">
-        <button onClick={() => onViewChange('chat')} className={cn('w-full flex items-center gap-3 p-2.5 rounded-xl transition-all font-bold', activeView === 'chat' ? 'bg-primary/10 text-primary shadow-sm' : 'hover:bg-muted text-muted-foreground')}>
-          <MessageSquare className="h-4 w-4" />
-          <span className="text-[13px] uppercase tracking-wider">Workspace Chat</span>
-        </button>
-        <button onClick={() => onViewChange('files')} className={cn('w-full flex items-center gap-3 p-2.5 rounded-xl transition-all font-bold', activeView === 'files' ? 'bg-primary/10 text-primary shadow-sm' : 'hover:bg-muted text-muted-foreground')}>
-          <FileText className="h-4 w-4" />
-          <span className="text-[13px] uppercase tracking-wider">Shared Assets</span>
-        </button>
-      </div>
-
-      <div className="flex border-b border-border bg-muted/20">
-        <button onClick={() => setActiveTab('dm')} className={cn('flex-1 py-3 text-[10px] font-bold tracking-[0.15em] transition-all relative', activeTab === 'dm' ? 'text-primary' : 'text-muted-foreground hover:text-foreground')}>DIRECT MESSAGES {activeTab === 'dm' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary" />}</button>
-        <button onClick={() => setActiveTab('groups')} className={cn('flex-1 py-3 text-[10px] font-bold tracking-[0.15em] transition-all relative', activeTab === 'groups' ? 'text-primary' : 'text-muted-foreground hover:text-foreground')}>WORK GROUPS {activeTab === 'groups' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary" />}</button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-2.5 space-y-1 scrollbar-hide bg-card/30">
-        {activeTab === 'dm' ? filteredUsers.map(user => {
-          const convId = getDmConvId(state.currentUser?.id, user.id);
-          const meta = state.conversationMeta[convId] || { pinned: false, muted: false, unreadCount: 0 };
-          const isActive = state.activeConversation?.id === convId;
-          const isDeactivated = user.isActive === false;
-          return (
+          <div className="ml-auto flex items-center gap-1 shrink-0">
+            <NotificationBell className="md:hidden" />
             <button
-              key={user.id}
-              onContextMenu={e => !isDeactivated && handleContextMenu(e, convId, user.name, 'dm')}
-              onClick={() => {
-                dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type: 'dm', id: convId, name: user.name, avatar: user.avatar } });
-                if (!isDeactivated) getSocket()?.emit('join_dm', { otherUserId: user.id });
-                onConversationSelect?.();
-              }}
-              className={cn(
-                'w-full flex items-center gap-3 p-2.5 rounded-xl transition-all group border border-transparent relative',
-                isDeactivated ? 'opacity-50 cursor-default' : isActive ? 'bg-primary/5 text-primary border-primary/10' : 'hover:bg-muted text-muted-foreground'
-              )}
+              className="md:hidden p-2 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              onClick={() => setMobileSearchOpen(true)}
+              aria-label="Search"
             >
-              <div className="relative">
-                <Avatar name={user.name} src={user.avatar} size="md" status={isDeactivated ? undefined : user.status} showStatus={!isDeactivated} className={isDeactivated ? 'grayscale' : ''} />
-                {meta.muted && !isDeactivated && (
-                  <div className="absolute -bottom-1 -right-1 bg-card rounded-full p-0.5 shadow-sm border border-border">
-                    <VolumeX className="h-2.5 w-2.5 text-muted-foreground" />
-                  </div>
+              <Search className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Tab bar */}
+      <div className="flex border-b border-border bg-muted/20 shrink-0">
+        <button
+          onClick={() => setActiveTab('chats')}
+          className={cn('flex-1 py-3 text-[10px] font-bold tracking-[0.15em] transition-all relative', activeTab === 'chats' ? 'text-primary' : 'text-muted-foreground hover:text-foreground')}
+        >
+          CHATS
+          {activeTab === 'chats' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary" />}
+        </button>
+        <button
+          onClick={() => setActiveTab('groups')}
+          className={cn('flex-1 py-3 text-[10px] font-bold tracking-[0.15em] transition-all relative', activeTab === 'groups' ? 'text-primary' : 'text-muted-foreground hover:text-foreground')}
+        >
+          GROUPS
+          {activeTab === 'groups' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary" />}
+        </button>
+      </div>
+
+      {/* Scrollable list */}
+      <div className="flex-1 overflow-y-auto px-2.5 pb-3 scrollbar-chat bg-card/30">
+
+        {activeTab === 'chats' ? (
+          <>
+            {/* ⭐ Favourites */}
+            <SectionHeader
+              icon={<Star className="h-3.5 w-3.5" />}
+              label="Favourites"
+              count={favouriteItems.length}
+              open={openSections.favourites}
+              onToggle={() => setOpenSections(s => ({ ...s, favourites: !s.favourites }))}
+            />
+            {openSections.favourites && (
+              <div className="space-y-0.5">
+                {favouriteItems.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground/40 text-center py-3 italic px-2">No favourites yet — right-click any chat to add one</p>
+                ) : (
+                  favouriteItems.map(item => renderDmItem(item))
                 )}
               </div>
-              <div className="flex-1 text-left min-w-0">
-                <div className="flex items-center gap-1">
-                  <p className={cn("text-sm truncate transition-colors", isDeactivated ? "text-muted-foreground font-semibold" : !isActive && meta.unreadCount > 0 && !meta.muted ? "font-bold text-foreground group-hover:text-primary" : "font-semibold group-hover:text-primary")}>{user.name}</p>
-                  {meta.pinned && !isDeactivated && <Pin className="h-2.5 w-2.5 text-primary" />}
-                  {meta.blocked && !isDeactivated && <Ban className="h-2.5 w-2.5 text-destructive" />}
-                  {isDeactivated && <Ban className="h-2.5 w-2.5 text-muted-foreground/50" />}
-                </div>
-                {isDeactivated ? (
-                  <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-tighter">Deactivated</p>
-                ) : meta.lastMessage ? (
-                    <p className={cn("text-[11px] truncate", !isActive && meta.unreadCount > 0 && !meta.muted ? "text-foreground font-semibold" : "text-muted-foreground")}>
-                    {String(meta.lastMessage.senderId) === String(state.currentUser?.id) ? 'You: ' : ''}{meta.lastMessage.content || '📎 Attachment'}
+            )}
+
+            {/* 💬 Chats */}
+            <SectionHeader
+              icon={<MessageSquare className="h-3.5 w-3.5" />}
+              label="Chats"
+              count={chatItems.length}
+              open={openSections.chats}
+              onToggle={() => setOpenSections(s => ({ ...s, chats: !s.chats }))}
+            />
+            {openSections.chats && (
+              <div className="space-y-0.5">
+                {chatItems.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground/40 text-center py-3 italic px-2">
+                    No direct messages yet
                   </p>
                 ) : (
-                  <p className="text-[10px] text-muted-foreground truncate font-bold uppercase tracking-tighter">{user.department}</p>
+                  chatItems.map(item => renderDmItem(item))
                 )}
               </div>
-              {!isDeactivated && meta.unreadCount > 0 && (
-                <Badge className={cn("h-5 px-1.5 font-bold rounded-lg", meta.muted ? "bg-muted-foreground/30 text-white" : "bg-secondary text-white")}>
-                  {meta.unreadCount}
-                </Badge>
-              )}
-            </button>
-          );
-        }) : (
+            )}
+
+            {/* 👥 Users */}
+            <SectionHeader
+              icon={<Users className="h-3.5 w-3.5" />}
+              label="Users"
+              count={userItems.length}
+              open={openSections.users}
+              onToggle={() => setOpenSections(s => ({ ...s, users: !s.users }))}
+            />
+            {openSections.users && (
+              <div className="space-y-0.5">
+                {userItems.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground/40 text-center py-3 italic px-2">
+                    Everyone has been messaged
+                  </p>
+                ) : (
+                  userItems.map(user => renderUserItem(user))
+                )}
+              </div>
+            )}
+          </>
+        ) : (
           <>
-            {filteredGroups.map(group => {
-              const meta = state.conversationMeta[group.id] || { pinned: false, muted: false, unreadCount: 0, hasUnreadMention: false };
-              const isActive = state.activeConversation?.id === group.id;
-              const isAdminOnly = group.settings.messagePermission === 'admin_only';
-              const hasLeft = !!(meta.leftAt);
-              return (
-                <button
-                  key={group.id}
-                  onContextMenu={e => !hasLeft && handleContextMenu(e, group.id, group.name, 'group')}
-                  onClick={() => {
-                    dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { type: 'group', id: group.id, name: group.name, avatar: group.avatar } });
-                    onConversationSelect?.();
-                  }}
-                  className={cn(
-                    'w-full flex items-center gap-3 p-2.5 rounded-xl transition-all group border border-transparent relative',
-                    hasLeft ? 'opacity-50' : isActive ? 'bg-primary/5 text-primary border-primary/10' : 'hover:bg-muted text-muted-foreground'
-                  )}
-                >
-                  <div className="relative">
-                    <GroupAvatar name={group.name} avatar={group.avatar} hasLeft={hasLeft} isActive={isActive} />
-                    {meta.muted && !hasLeft && (
-                      <div className="absolute -bottom-1 -right-1 bg-card rounded-full p-0.5 shadow-sm border border-border">
-                        <VolumeX className="h-2.5 w-2.5 text-muted-foreground" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex-1 text-left min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <p className={cn("text-sm truncate transition-colors", hasLeft ? "text-muted-foreground font-semibold" : !isActive && (meta.unreadCount > 0 || meta.hasUnreadMention) && !meta.muted ? "font-bold text-foreground group-hover:text-primary" : "font-semibold group-hover:text-primary")}>
-                        {group.name}
-                      </p>
-                      {meta.pinned && !hasLeft && <Pin className="h-2.5 w-2.5 text-primary" />}
-                      {isAdminOnly && !hasLeft && <Lock className="h-2.5 w-2.5 text-muted-foreground/40" />}
-                      {hasLeft && <LogOut className="h-2.5 w-2.5 text-muted-foreground/50" />}
-                    </div>
-                    {hasLeft ? (
-                      <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-tighter">You left this group</p>
-                    ) : meta.lastMessage ? (
-                      <p className={cn("text-[11px] truncate", !isActive && (meta.unreadCount > 0 || meta.hasUnreadMention) && !meta.muted ? "text-foreground font-semibold" : "text-muted-foreground")}>
-                        {meta.lastMessage.senderId === state.currentUser?.id
-                          ? 'You: '
-                          : `${state.users.find(u => u.id === meta.lastMessage!.senderId)?.name?.split(' ')[0] || ''}: `
-                        }{meta.lastMessage.content || '📎 Attachment'}
-                      </p>
-                    ) : (
-                      <p className="text-[10px] text-muted-foreground truncate font-bold uppercase tracking-tighter">{group.members.length} members</p>
-                    )}
-                  </div>
-                  {hasLeft ? (
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      className="p-1 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors shrink-0"
-                      title="Remove from list"
-                      onClick={async e => {
-                        e.stopPropagation();
-                        try { await api.delete(`/groups/${group.id}/leave/dismiss`); } catch { /* ignore */ }
-                        dispatch({ type: 'DISMISS_LEFT_GROUP', payload: group.id });
-                      }}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          api.delete(`/groups/${group.id}/leave/dismiss`).catch(() => {});
-                          dispatch({ type: 'DISMISS_LEFT_GROUP', payload: group.id });
-                        }
-                      }}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </div>
-                  ) : meta.hasUnreadMention ? (
-                    <Badge className="h-5 px-1.5 bg-secondary text-white font-bold rounded-lg animate-pulse">@</Badge>
-                  ) : meta.unreadCount > 0 ? (
-                    <Badge className={cn("h-5 px-1.5 font-bold rounded-lg", meta.muted ? "bg-muted-foreground/30 text-white" : "bg-muted-foreground text-white")}>
-                      {meta.unreadCount}
-                    </Badge>
-                  ) : null}
-                </button>
-              );
-            })}
-            <Button variant="outline" className="w-full mt-3 border-dashed border-primary/30 text-primary hover:bg-primary/5 h-11 gap-2 font-bold rounded-xl" onClick={onCreateGroup}><Plus className="h-4 w-4" /> Create New Group</Button>
+            {/* ➕ New Group button */}
+            <button
+              onClick={onCreateGroup}
+              className="w-full mt-3 mb-1 flex items-center justify-center gap-2 p-2.5 rounded-xl border-2 border-dashed border-primary/30 text-primary hover:bg-primary/5 hover:border-primary/50 transition-all font-bold text-sm"
+            >
+              <Plus className="h-4 w-4" />
+              New Group
+            </button>
+
+            {/* Groups list */}
+            <div className="space-y-0.5 mt-1">
+              {sortedGroups.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground/40 text-center py-6 italic px-2">
+                  No groups yet — create one!
+                </p>
+              ) : (
+                sortedGroups.map(group => renderGroupItem({ kind: 'group', convId: group.id, group }))
+              )}
+            </div>
           </>
         )}
+
       </div>
 
+      {/* Bottom bar */}
       <div className="p-4 border-t border-border space-y-2 bg-muted/10">
-        {/* Admin + Settings buttons only on desktop — mobile uses bottom nav */}
-        {state.currentUser?.role === 'admin' && <button onClick={() => onViewChange('admin')} className={cn('hidden md:flex w-full items-center gap-3 p-2.5 rounded-xl transition-all shadow-md font-bold', activeView === 'admin' ? 'bg-primary text-white' : 'bg-card border border-border hover:bg-muted text-muted-foreground')}><Shield className="h-4 w-4" /><span className="text-[13px] uppercase tracking-wider">Admin Control</span></button>}
+        {state.currentUser?.role === 'admin' && (
+          <button
+            onClick={() => onViewChange('admin')}
+            className={cn('hidden md:flex w-full items-center gap-3 p-2.5 rounded-xl transition-all shadow-md font-bold', activeView === 'admin' ? 'bg-primary text-white' : 'bg-card border border-border hover:bg-muted text-muted-foreground')}
+          >
+            <Shield className="h-4 w-4" />
+            <span className="text-[13px] uppercase tracking-wider">Admin Control</span>
+          </button>
+        )}
         <div className="flex items-center justify-between p-2.5 rounded-2xl bg-card border border-border shadow-xl ring-1 ring-black/5">
           <div className="flex items-center gap-3 min-w-0">
-            <div
-              className="relative group/avatar cursor-pointer shrink-0"
-              onClick={() => avatarInputRef.current?.click()}
-              title="Change profile picture"
-            >
+            <div className="relative group/avatar cursor-pointer shrink-0" onClick={() => avatarInputRef.current?.click()} title="Change profile picture">
               <Avatar name={state.currentUser?.name || ''} src={state.currentUser?.avatar} size="sm" status="online" showStatus />
               <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover/avatar:opacity-100 transition-opacity z-10">
                 {uploadingAvatar
@@ -496,18 +749,19 @@ const Sidebar: React.FC<{
             </div>
           </div>
           <div className="flex gap-1 shrink-0">
-            <Tooltip><TooltipTrigger asChild><button onClick={() => onViewChange('settings')} className={cn("p-2 rounded-lg transition-all", activeView === 'settings' ? 'bg-primary text-white' : 'text-muted-foreground hover:bg-muted')}><Settings className="h-4 w-4" /></button></TooltipTrigger><TooltipContent side="top">Preferences</TooltipContent></Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button onClick={() => onViewChange('settings')} className={cn('p-2 rounded-lg transition-all', activeView === 'settings' ? 'bg-primary text-white' : 'text-muted-foreground hover:bg-muted')}>
+                  <Settings className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Preferences</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={async () => {
-                    try {
-                      await logoutUser();
-                    } catch (e) {
-                      console.error('Logout failed:', e);
-                    } finally {
-                      dispatch({ type: 'LOGOUT' });
-                    }
+                    try { await logoutUser(); } catch (e) { console.error('Logout failed:', e); } finally { dispatch({ type: 'LOGOUT' }); }
                   }}
                   className="p-2 hover:bg-destructive/10 hover:text-destructive rounded-lg text-muted-foreground transition-all"
                 >
@@ -520,7 +774,115 @@ const Sidebar: React.FC<{
         </div>
       </div>
 
-      {ctxMenu && <ContextMenu x={ctxMenu.x} y={ctxMenu.y} convId={ctxMenu.id} convName={ctxMenu.name} type={ctxMenu.type} onClose={() => setCtxMenu(null)} />}
+      {/* Mobile search overlay — full-screen within sidebar, slide in from top */}
+      {mobileSearchOpen && (
+        <div className="absolute inset-0 z-50 bg-card flex flex-col md:hidden animate-in slide-in-from-top-2 duration-200">
+          {/* Search input row */}
+          <div className="p-4 border-b border-border bg-card/95 shrink-0">
+            <div className="flex items-center gap-2">
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60" />
+                <input
+                  ref={mobileSearchRef}
+                  autoFocus
+                  type="text"
+                  placeholder="Search team members and group spaces"
+                  className="w-full pl-9 pr-4 py-2.5 bg-muted/40 border-none rounded-xl text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all font-medium"
+                  value={mobileSearchQuery}
+                  onChange={e => setMobileSearchQuery(e.target.value)}
+                />
+              </div>
+              <button
+                onClick={() => { setMobileSearchOpen(false); setMobileSearchQuery(''); }}
+                className="shrink-0 p-2 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Results area */}
+          <div className="flex-1 overflow-y-auto px-3 py-3 scrollbar-chat">
+            {mobileSearchQuery.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full pb-16 opacity-30">
+                <Search className="h-12 w-12 mb-3 text-muted-foreground" />
+                <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Search people or groups</p>
+              </div>
+            ) : !mobileSearchResults || (mobileSearchResults.people.length === 0 && mobileSearchResults.groups.length === 0) ? (
+              <div className="flex flex-col items-center justify-center h-full pb-16 opacity-30">
+                <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground">No results found</p>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {mobileSearchResults.people.length > 0 && (
+                  <div>
+                    <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2 px-1">People</h4>
+                    <div className="space-y-0.5">
+                      {mobileSearchResults.people.map(u => (
+                        <button
+                          key={u.id}
+                          onClick={() => u.isActive !== false && handleMobileSearchSelect('dm', u)}
+                          className={cn(
+                            'w-full flex items-center gap-3 p-2.5 rounded-xl transition-all text-left',
+                            u.isActive === false ? 'opacity-50 cursor-default' : 'hover:bg-muted'
+                          )}
+                        >
+                          <Avatar name={u.name} src={u.avatar} size="md" status={u.isActive === false ? undefined : u.status} showStatus={u.isActive !== false} className={u.isActive === false ? 'grayscale' : ''} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-foreground truncate">{u.name}</p>
+                            <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-tighter">{u.department}</p>
+                          </div>
+                          {u.isActive === false && (
+                            <span className="shrink-0 text-[9px] font-bold text-muted-foreground uppercase bg-muted px-1.5 py-0.5 rounded">Inactive</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {mobileSearchResults.groups.length > 0 && (
+                  <div>
+                    <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2 px-1">Groups</h4>
+                    <div className="space-y-0.5">
+                      {mobileSearchResults.groups.map(g => (
+                        <button
+                          key={g.id}
+                          onClick={() => handleMobileSearchSelect('group', g)}
+                          className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-all text-left"
+                        >
+                          <GroupAvatar name={g.name} avatar={g.avatar} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-foreground truncate">{g.name}</p>
+                            <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-tighter">{g.members.length} members</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Context menu backdrop + menu */}
+      {ctxMenu && (
+        <>
+          <div className="fixed inset-0 z-[49]" onPointerDown={() => setCtxMenu(null)} />
+          <ContextMenu
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            convId={ctxMenu.id}
+            convName={ctxMenu.name}
+            type={ctxMenu.type}
+            onClose={() => setCtxMenu(null)}
+            isFavourite={isFavourite(ctxMenu.id)}
+            onToggleFavourite={() => toggleFavourite(ctxMenu.id)}
+            hasHistory={ctxMenu.hasHistory}
+          />
+        </>
+      )}
     </div>
   );
 };

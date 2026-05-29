@@ -332,7 +332,7 @@ function setupSocket(io, optimizationService) {
         // Push notifications — fire-and-forget, never blocks message delivery
         try {
           const { sendPushToUser } = require('./services/pushService');
-          console.log(`[push] message saved — attempting push to ${notifyRecipients.length} recipient(s): [${notifyRecipients.join(', ')}]`);
+          // fire-and-forget push dispatch
           if (notifyRecipients.length > 0) {
             const pushBody = (message.content || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1').slice(0, 100) || '📎 Attachment';
             const [sRows] = await pool.query('SELECT name FROM users WHERE id = ? AND is_active = 1', [userId]);
@@ -351,9 +351,7 @@ function setupSocket(io, optimizationService) {
               conversationType: conversationId.startsWith('dm_') ? 'dm' : 'group',
               url: '/',
             };
-            console.log(`[push] payload — title="${pushTitle}" body="${pushBody.slice(0, 60)}"`);
             for (const recipientId of notifyRecipients) {
-              console.log(`[push] dispatching to user ${recipientId}`);
               sendPushToUser(recipientId, pushPayload).catch((err) => {
                 console.warn(`[push] dispatch failed for user ${recipientId}:`, err.message);
               });
@@ -363,7 +361,7 @@ function setupSocket(io, optimizationService) {
           console.error('[push] error (message still delivered):', pushErr.message);
         }
 
-        // For DMs, only send a personal-room fallback when the recipient is not currently in the DM room.
+        // For DMs, send a personal-room fallback to the recipient when they are not in the DM room.
         if (conversationId.startsWith('dm_')) {
           const parts = conversationId.split('_');
           const otherId = String(parts[1]) === String(userId) ? parts[2] : parts[1];
@@ -374,6 +372,12 @@ function setupSocket(io, optimizationService) {
             socket.to(`user_${otherId}`).emit('new_message', { conversationId, message });
           }
         }
+
+        // Multi-device sync: push the new message to the sender's OTHER connected devices.
+        // The sending device gets it via the ack callback; other devices may not be in the DM
+        // room, so we use the personal room as a reliable delivery channel.
+        // Frontend dedup (processedMsgIds) prevents any device from showing it twice.
+        socket.to(`user_${userId}`).emit('new_message', { conversationId, message });
 
         // Send the saved message back to the sender via the ack so they can add it locally
         callback?.({ success: true, message });
@@ -552,7 +556,6 @@ socket.on('typing', async ({ conversationId }) => {
     // Delete message
     socket.on('delete_message', async ({ messageId, conversationId }, callback) => {
       try {
-        console.log(`[delete_message] user=${userId} msgId=${messageId} conv=${conversationId}`);
 
         if (!conversationId?.startsWith('dm_')) {
           const [membershipRows] = await pool.query(
@@ -587,7 +590,6 @@ socket.on('typing', async ({ conversationId }) => {
 
         // Broadcast to everyone in the conversation room (DM or group)
         io.to(conversationId).emit('message_deleted', payload);
-        console.log(`[delete_message] broadcasted to room=${conversationId}`);
 
         // For DMs: also push via each participant's personal room as a fallback
         // (covers the case where a user hasn't joined the DM room yet)
@@ -598,7 +600,6 @@ socket.on('typing', async ({ conversationId }) => {
           const uid2 = parts[2];
           io.to(`user_${uid1}`).emit('message_deleted', payload);
           io.to(`user_${uid2}`).emit('message_deleted', payload);
-          console.log(`[delete_message] personal room fallback → user_${uid1}, user_${uid2}`);
         } else {
           // For groups: push to each member's personal room so members outside the active room catch it
           try {
@@ -1106,32 +1107,16 @@ socket.on('typing', async ({ conversationId }) => {
       }
     });
 
-    // Conversation metadata changes (mute, pin, block)
-    socket.on('conversation_metadata_changed', async ({ conversationId, action, value }, callback) => {
-      try {
-        // Broadcast metadata change to all connected users in the conversation
-        io.to(conversationId).emit('conversation_metadata_updated', {
-          conversationId,
-          userId: String(userId),
-          action,
-          value,
-          timestamp: new Date().toISOString(),
-        });
-
-        // Also notify other devices for the same user so block/mute/pin state stays in sync across sessions
-        socket.broadcast.to(`user_${userId}`).emit('conversation_metadata_updated', {
-          conversationId,
-          userId: String(userId),
-          action,
-          value,
-          timestamp: new Date().toISOString(),
-        });
-
-        callback?.({ success: true });
-      } catch (err) {
-        console.error('[conversation_metadata_changed] error:', err);
-        callback?.({ success: false, error: 'Server error' });
-      }
+    // Conversation metadata changes (mute, pin, block, favourites)
+    // Only broadcasts to the user's OTHER devices — the sending device already applied the change locally.
+    socket.on('conversation_metadata_changed', ({ conversationId, action, value }) => {
+      if (!conversationId || !action) return;
+      socket.to(`user_${userId}`).emit('conversation_metadata_updated', {
+        conversationId,
+        userId: String(userId),
+        action,
+        value,
+      });
     });
   });
 }

@@ -43,9 +43,8 @@ export function useSocket() {
           previews: Record<string, { senderId: string; content: string; type: string; timestamp: string }>;
         }>('/messages/unread-since', { conversations: toCheck });
         dispatch({ type: 'UPDATE_UNREAD_COUNTS', payload: { counts, previews } });
-        console.log('[Socket] missed-message sync done:', JSON.stringify(counts));
-      } catch (e) {
-        console.warn('[Socket] syncMissedMessages failed', e);
+      } catch {
+        // best-effort — silently fail so it doesn't surface to the user
       }
     };
 
@@ -228,7 +227,6 @@ export function useSocket() {
 
       // On reconnect (not the very first connect) pull any messages that arrived while offline
       if (loadedOnce.current) {
-        console.log('[Socket] reconnected — syncing missed messages');
         syncMissedMessages();
       }
     });
@@ -273,11 +271,7 @@ export function useSocket() {
       if (message.senderId !== s.currentUser?.id) {
         const socketInstance = getSocket();
         if (socketInstance?.connected) {
-          socketInstance.emit('message_received', { messageId: message.id, conversationId }, (response: any) => {
-            if (!response?.success) {
-              console.warn('[ReadReceipt] message_received failed:', response?.error);
-            }
-          });
+          socketInstance.emit('message_received', { messageId: message.id, conversationId });
         }
       }
 
@@ -349,9 +343,7 @@ export function useSocket() {
         dispatch({ type: 'REACTIVATE_USER', payload: String(userId) });
         const res = await api.get('/users/directory');
         if (res && Array.isArray(res.users)) dispatch({ type: 'SET_USERS', payload: res.users.map((u: any) => ({ ...u, id: String(u.id), isActive: u.is_active === 1 })) });
-      } catch (e) {
-        console.warn('user_reactivated handler failed', e);
-      }
+      } catch { /* best-effort */ }
     });
 
     const processedUndeletes = new Set<string>();
@@ -749,7 +741,6 @@ export function useSocket() {
     // Check every 30 s; if disconnected, kick Socket.IO's own reconnect loop.
     const heartbeatTimer = setInterval(() => {
       if (!getSocket()?.connected && stateRef.current.isAuthenticated) {
-        console.log('[Socket] heartbeat: not connected — reconnecting');
         getSocket()?.connect();
       }
     }, 30_000);
@@ -760,10 +751,8 @@ export function useSocket() {
       if (document.visibilityState !== 'visible') return;
       const sock = getSocket();
       if (!sock?.connected && stateRef.current.isAuthenticated) {
-        console.log('[Socket] foregrounded — reconnecting');
         sock?.connect();
       } else if (sock?.connected && loadedOnce.current) {
-        // Connected but might have missed events while the tab was hidden
         syncMissedMessages();
       }
     };
@@ -773,6 +762,9 @@ export function useSocket() {
       initialized.current = false;
       clearInterval(heartbeatTimer);
       document.removeEventListener('visibilitychange', handleVisibility);
+      // Remove all event listeners before disconnecting so no handler fires
+      // on the stale socket instance if the component remounts quickly.
+      getSocket()?.offAny();
       disconnectSocket();
     };
   }, [state.isAuthenticated, dispatch]);

@@ -31,6 +31,7 @@ import ForwardMessageModal from '../modals/ForwardMessageModal';
 import FilePreviewModal from '../modals/FilePreviewModal';
 import LeaveGroupModal from '../modals/LeaveGroupModal';
 import { Toaster } from '../ui/toaster';
+import { ErrorBoundary } from '../ErrorBoundary';
 
 const AppShell: React.FC = () => {
   const { state, dispatch } = useAppContext();
@@ -100,18 +101,22 @@ const AppShell: React.FC = () => {
       case 'chat':
         return (
           <>
-            <ChatArea onBack={() => setMobileSidebarOpen(true)} />
-            <RightPanel />
+            <ErrorBoundary>
+              <ChatArea onBack={() => setMobileSidebarOpen(true)} />
+            </ErrorBoundary>
+            <ErrorBoundary>
+              <RightPanel />
+            </ErrorBoundary>
           </>
         );
       case 'admin':
-        return <AdminDashboard />;
+        return <ErrorBoundary><AdminDashboard /></ErrorBoundary>;
       case 'files':
-        return <FilesPage />;
+        return <ErrorBoundary><FilesPage /></ErrorBoundary>;
       case 'settings':
-        return <SettingsPage />;
+        return <ErrorBoundary><SettingsPage /></ErrorBoundary>;
       default:
-        return <ChatArea onBack={() => setMobileSidebarOpen(true)} />;
+        return <ErrorBoundary><ChatArea onBack={() => setMobileSidebarOpen(true)} /></ErrorBoundary>;
     }
   };
 
@@ -148,17 +153,18 @@ const AppShell: React.FC = () => {
           showSidebar ? 'flex w-full' : 'hidden md:flex',
         )}
       >
-        <Sidebar
-          onViewChange={(view) => dispatch({ type: 'SET_ACTIVE_VIEW', payload: view })}
-          onCreateGroup={() => dispatch({ type: 'OPEN_MODAL', payload: { type: 'createGroup' } })}
-          activeView={state.activeView}
-          onConversationSelect={() => {
-            // On mobile, selecting a conversation hides the sidebar
-            if (typeof window !== 'undefined' && window.innerWidth < 768) {
-              setMobileSidebarOpen(false);
-            }
-          }}
-        />
+        <ErrorBoundary>
+          <Sidebar
+            onViewChange={(view) => dispatch({ type: 'SET_ACTIVE_VIEW', payload: view })}
+            onCreateGroup={() => dispatch({ type: 'OPEN_MODAL', payload: { type: 'createGroup' } })}
+            activeView={state.activeView}
+            onConversationSelect={() => {
+              if (typeof window !== 'undefined' && window.innerWidth < 768) {
+                setMobileSidebarOpen(false);
+              }
+            }}
+          />
+        </ErrorBoundary>
       </div>
 
       {/* ── Main content area ── */}

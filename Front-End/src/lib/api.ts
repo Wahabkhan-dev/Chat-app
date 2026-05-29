@@ -43,10 +43,11 @@ async function request<T>(
 
   const data = await res.json();
 
-  // 401 = no token / token structurally invalid — clear and surface the error
-  if (res.status === 401) {
+  // 401 / 403 both mean the session is no longer valid — clear the token so
+  // the auth layer can redirect to login cleanly instead of looping on errors.
+  if (res.status === 401 || res.status === 403) {
     clearToken();
-    throw new Error('Unauthorized. Please login again.');
+    throw new Error(data.message || 'Session expired. Please login again.');
   }
 
   if (!res.ok) {
