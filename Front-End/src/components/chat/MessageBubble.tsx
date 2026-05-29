@@ -35,6 +35,7 @@ const MessageStatus: React.FC<{ status?: Message['status'] }> = ({ status }) => 
 const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }) => {
   const { state, dispatch } = useAppContext();
   const [editText, setEditText] = useState(message.content);
+  const [expanded, setExpanded] = useState(false);
   const isMe = String(message.senderId) === String(state.currentUser?.id);
   const isAdmin = state.currentUser?.role === 'admin';
   const sender = state.users.find(u => String(u.id) === String(message.senderId));
@@ -188,17 +189,75 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
         ? message.content.slice('[Forwarded]: '.length)
         : message.content;
       if (!rawContent) return null;
-      let content = rawContent
-        .replace(/@\[everyone\]\(everyone\)/g, '<span class="text-white bg-yellow-500 px-1.5 py-0.5 rounded-md font-bold cursor-pointer hover:bg-yellow-600 transition-colors">@everyone</span>')
-        .replace(/@\[(.*?)\]\((.*?)\)/g, '<span class="text-accent bg-accent/10 px-1 rounded font-bold cursor-pointer hover:bg-accent/20 transition-colors" data-user-id="$2">@$1</span>');
-      const urlRegex = /(https?:\/\/[^\s]+)/g;
-      content = content.replace(urlRegex, (url) => {
-        return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-blue-500 underline decoration-blue-500/30 hover:decoration-blue-500 transition-all font-medium">${url}</a>`;
-      });
+
+      const THRESHOLD = 300;
+      const shouldCollapse = !isEditing && rawContent.length > THRESHOLD;
+      const displayContent = shouldCollapse && !expanded
+        ? rawContent.substring(0, THRESHOLD)
+        : rawContent;
+
+      const applyInline = (text: string): string => {
+        let out = text
+          .replace(/@\[everyone\]\(everyone\)/g, '<span class="text-white bg-yellow-500 px-1.5 py-0.5 rounded-md font-bold cursor-pointer hover:bg-yellow-600 transition-colors">@everyone</span>')
+          .replace(/@\[(.*?)\]\((.*?)\)/g, '<span class="text-accent bg-accent/10 px-1 rounded font-bold cursor-pointer hover:bg-accent/20 transition-colors" data-user-id="$2">@$1</span>');
+        out = out.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        out = out.replace(/(https?:\/\/[^\s<]+)/g, (url) =>
+          `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-blue-500 underline decoration-blue-500/30 hover:decoration-blue-500 transition-all font-medium">${url}</a>`
+        );
+        return out;
+      };
+
+      const lines = displayContent.split('\n');
+      const nodes: React.ReactNode[] = [];
+      let i = 0;
+
+      while (i < lines.length) {
+        const line = lines[i];
+        if (/^• /.test(line) || /^- /.test(line)) {
+          const items: string[] = [];
+          while (i < lines.length && (/^• /.test(lines[i]) || /^- /.test(lines[i]))) {
+            items.push(lines[i].replace(/^[•-] /, ''));
+            i++;
+          }
+          nodes.push(
+            <ul key={`ul-${i}`} className="list-disc list-inside space-y-0.5 text-sm leading-relaxed">
+              {items.map((item, idx) => (
+                <li key={idx} dangerouslySetInnerHTML={{ __html: applyInline(item) }} />
+              ))}
+            </ul>
+          );
+        } else if (/^\d+\. /.test(line)) {
+          const items: string[] = [];
+          while (i < lines.length && /^\d+\. /.test(lines[i])) {
+            items.push(lines[i].replace(/^\d+\. /, ''));
+            i++;
+          }
+          nodes.push(
+            <ol key={`ol-${i}`} className="list-decimal list-inside space-y-0.5 text-sm leading-relaxed">
+              {items.map((item, idx) => (
+                <li key={idx} dangerouslySetInnerHTML={{ __html: applyInline(item) }} />
+              ))}
+            </ol>
+          );
+        } else {
+          nodes.push(
+            <p key={`p-${i}`} className="text-sm leading-relaxed whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: applyInline(line) }} />
+          );
+          i++;
+        }
+      }
 
       return (
-        <div className="space-y-2">
-          <p className="text-sm whitespace-pre-wrap leading-relaxed" dangerouslySetInnerHTML={{ __html: content }} />
+        <div className="space-y-1">
+          <div className="space-y-1">{nodes}</div>
+          {shouldCollapse && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setExpanded(v => !v); }}
+              className={`mt-1 text-xs font-bold transition-colors ${isMe ? 'text-white/70 hover:text-white' : 'text-primary/70 hover:text-primary'}`}
+            >
+              {expanded ? 'Show less' : '... Show more'}
+            </button>
+          )}
           {message.links && message.links.length > 0 && (
             <LinkPreviewCard metadata={message.links[0]} />
           )}
@@ -231,7 +290,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
         </div>
       )}
       
-      <div className={cn('flex flex-col', isEditing ? 'w-full' : 'max-w-[75%]', isMe ? 'items-end' : 'items-start')}>
+      <div className={cn('flex flex-col', isEditing ? 'w-full md:max-w-[55%]' : 'max-w-[75%]', isMe ? 'items-end' : 'items-start')}>
         {isFirstInGroup && !isMe && state.activeConversation?.type === 'group' && (
           <span className="text-[10px] font-bold text-primary mb-1 uppercase tracking-widest ml-1">{sender?.name}</span>
         )}

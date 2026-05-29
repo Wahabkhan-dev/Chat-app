@@ -332,7 +332,7 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
 
       {/* Messages */}
       <div
-        className="flex-1 overflow-y-auto p-3 md:p-6 scrollbar-hide scroll-smooth relative touch-scroll"
+        className="flex-1 overflow-y-auto p-3 md:p-6 scrollbar-chat scroll-smooth relative touch-scroll"
         ref={scrollRef}
         onScroll={handleScroll}
       >

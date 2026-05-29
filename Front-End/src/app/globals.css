@@ -113,6 +113,26 @@
   border-radius: 9999px;
 }
 
+/* Themed chat scrollbar — uses primary color, fades when idle */
+.scrollbar-chat {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--primary) / 0.25) transparent;
+}
+.scrollbar-chat::-webkit-scrollbar {
+  width: 5px;
+}
+.scrollbar-chat::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-chat::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--primary) / 0.25);
+  border-radius: 9999px;
+  transition: background-color 0.2s;
+}
+.scrollbar-chat::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--primary) / 0.55);
+}
+
 /* Mobile touch scrolling */
 .touch-scroll {
   -webkit-overflow-scrolling: touch;

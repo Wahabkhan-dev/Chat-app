@@ -171,7 +171,19 @@ const MessageInput: React.FC = () => {
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
+    let value = e.target.value;
+
+    // Auto-convert "- " at the start of a line to "• "
+    const lines = value.split('\n');
+    const lastLine = lines[lines.length - 1];
+    if (lastLine === '- ') {
+      lines[lines.length - 1] = '• ';
+      value = lines.join('\n');
+      setTimeout(() => {
+        if (textareaRef.current) textareaRef.current.setSelectionRange(value.length, value.length);
+      }, 0);
+    }
+
     setInputText(value);
 
     // Emit typing indicator
@@ -402,7 +414,37 @@ const MessageInput: React.FC = () => {
                 else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlightedIndex(i => (i - 1 + filteredMembers.length) % filteredMembers.length); }
                 else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); selectMember(filteredMembers[highlightedIndex]); }
                 else if (e.key === 'Escape') { e.preventDefault(); setShowMentions(false); }
-              } else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); }
+              } else if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+                e.preventDefault();
+                const textarea = textareaRef.current;
+                if (!textarea) return;
+                const start = textarea.selectionStart;
+                const end = textarea.selectionEnd;
+                const selected = inputText.substring(start, end);
+                if (selected) {
+                  const newText = inputText.substring(0, start) + `**${selected}**` + inputText.substring(end);
+                  setInputText(newText);
+                  setTimeout(() => textarea.setSelectionRange(start + 2, end + 2), 0);
+                }
+              } else if (e.key === 'Enter' && !e.shiftKey) {
+                const textarea = textareaRef.current;
+                if (textarea) {
+                  const cursorPos = textarea.selectionStart;
+                  const currentLine = inputText.substring(0, cursorPos).split('\n').pop() || '';
+                  const numberedMatch = currentLine.match(/^(\d+)\. /);
+                  if (numberedMatch) {
+                    e.preventDefault();
+                    const nextNum = parseInt(numberedMatch[1]) + 1;
+                    const insert = `\n${nextNum}. `;
+                    const newText = inputText.substring(0, cursorPos) + insert + inputText.substring(cursorPos);
+                    setInputText(newText);
+                    setTimeout(() => textarea.setSelectionRange(cursorPos + insert.length, cursorPos + insert.length), 0);
+                    return;
+                  }
+                }
+                e.preventDefault();
+                handleSendMessage();
+              }
             }}
           />
           <div className="px-3 md:px-4 pb-2 md:pb-3 flex items-center justify-between">
