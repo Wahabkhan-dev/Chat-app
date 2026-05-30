@@ -154,6 +154,9 @@ export function useSocket() {
               const currentUserId = uid || '';
               Object.entries(counts).forEach(([convId, count]) => {
                 if (Number(count) <= 0) return;
+                // Skip bell notification for muted conversations
+                const convMeta = stateRef.current.conversationMeta[convId];
+                if (convMeta?.muted && (!convMeta.muteUntil || new Date(convMeta.muteUntil) > new Date())) return;
                 const isDm = convId.startsWith('dm_');
                 const preview = previews?.[convId];
                 const rawContent = preview?.content || '';
@@ -561,6 +564,14 @@ export function useSocket() {
         return;
       }
 
+      // Suppress notifications for muted conversations (message types only — reactions, mentions
+      // from @everyone, etc. should still show if the user specifically muted only message noise)
+      if (isMessageNotification && notif.conversationId) {
+        const meta = s.conversationMeta[notif.conversationId];
+        const effectivelyMuted = meta?.muted && (!meta.muteUntil || new Date(meta.muteUntil) > new Date());
+        if (effectivelyMuted) return;
+      }
+
       dispatch({
         type: 'ADD_NOTIFICATION',
         payload: {
@@ -652,7 +663,7 @@ export function useSocket() {
           dispatch({ type: 'UNBLOCK_USER', payload: conversationId });
           break;
         case 'mute':
-          dispatch({ type: 'MUTE_CONVERSATION', payload: { conversationId, muteUntil: null } });
+          dispatch({ type: 'MUTE_CONVERSATION', payload: { conversationId, muteUntil: value?.mutedUntil ?? null } });
           break;
         case 'unmute':
           dispatch({ type: 'UNMUTE_CONVERSATION', payload: conversationId });
@@ -662,6 +673,12 @@ export function useSocket() {
           break;
         case 'unpin':
           dispatch({ type: 'UNPIN_CONVERSATION', payload: conversationId });
+          break;
+        case 'mark_unread':
+          dispatch({ type: 'MARK_CONVERSATION_UNREAD', payload: conversationId });
+          break;
+        case 'mark_read':
+          dispatch({ type: 'MARK_CONVERSATION_READ', payload: conversationId });
           break;
         default:
           break;

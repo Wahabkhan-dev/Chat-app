@@ -161,6 +161,108 @@ async function getPinnedConversations(userId) {
 }
 
 /**
+ * Touch (upsert) a conversation_metadata row for a user, creating it if absent.
+ * Called when a user sends a message or the recipient receives one — this is what
+ * moves a DM from the Users section to the Chats section in the sidebar.
+ * Does NOT touch is_unread so it is safe to call for both sender and recipient,
+ * and works even before the is_unread column has been added via ALTER TABLE.
+ * Non-fatal: errors are swallowed so they never block message delivery.
+ */
+async function touchConversation(conversationId, userId) {
+  try {
+    await pool.query(
+      `INSERT INTO conversation_metadata (conversation_id, user_id, updated_at)
+       VALUES (?, ?, NOW())
+       ON DUPLICATE KEY UPDATE updated_at = NOW()`,
+      [conversationId, userId]
+    );
+  } catch (error) {
+    console.error('Error touching conversation metadata:', error.message);
+  }
+}
+
+/**
+ * Clear the manual unread flag when a user opens a conversation.
+ * Separated from touchConversation so that recipients are never accidentally
+ * marked as read when a new message arrives.
+ * Non-fatal: errors are swallowed, and the UPDATE is a no-op if is_unread column
+ * has not been added yet.
+ */
+async function clearConversationUnread(conversationId, userId) {
+  try {
+    await pool.query(
+      `UPDATE conversation_metadata SET is_unread = 0, updated_at = NOW()
+       WHERE conversation_id = ? AND user_id = ? AND is_unread = 1`,
+      [conversationId, userId]
+    );
+  } catch {
+    // is_unread column may not exist yet — non-fatal
+  }
+}
+
+/**
+ * Set the manual unread flag for a conversation.
+ * is_unread = 1 → user explicitly marked this conversation as unread.
+ * is_unread = 0 → cleared when they open the conversation (via touchConversation).
+ */
+async function setUnreadStatus(conversationId, userId, isUnread) {
+  try {
+    const [result] = await pool.query(
+      `INSERT INTO conversation_metadata (conversation_id, user_id, is_unread, updated_at)
+       VALUES (?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE is_unread = ?, updated_at = NOW()`,
+      [conversationId, userId, isUnread ? 1 : 0, isUnread ? 1 : 0]
+    );
+    return result.affectedRows > 0 || result.changedRows > 0;
+  } catch (error) {
+    console.error('Error setting unread status:', error.message);
+    throw error;
+  }
+}
+
+/**
+ * Get all DM conversations the user has interacted with (has a conversation_metadata row),
+ * enriched with the latest message preview from the messages table.
+ * The existence of a row drives Chats vs Users section — the message preview is cosmetic.
+ */
+async function getConversationList(userId) {
+  try {
+    const [rows] = await pool.query(
+      `SELECT
+         cm.conversation_id,
+         MAX(m.created_at) AS last_message_at,
+         SUBSTRING_INDEX(
+           GROUP_CONCAT(m.content ORDER BY m.created_at DESC SEPARATOR CHAR(1)),
+           CHAR(1), 1
+         ) AS last_content,
+         SUBSTRING_INDEX(
+           GROUP_CONCAT(CAST(m.sender_id AS CHAR) ORDER BY m.created_at DESC SEPARATOR CHAR(1)),
+           CHAR(1), 1
+         ) AS last_sender_id
+       FROM conversation_metadata cm
+       LEFT JOIN messages m
+         ON m.conversation_id = cm.conversation_id AND m.is_deleted = 0
+       WHERE cm.user_id = ? AND cm.conversation_id LIKE 'dm_%'
+       GROUP BY cm.conversation_id, cm.updated_at
+       ORDER BY COALESCE(MAX(m.created_at), cm.updated_at) DESC
+       LIMIT 500`,
+      [userId]
+    );
+
+    return rows.map(row => ({
+      conversationId: row.conversation_id,
+      type: 'dm',
+      lastMessageAt: row.last_message_at ? row.last_message_at.toISOString() : null,
+      lastMessageContent: row.last_content || '',
+      lastMessageSenderId: row.last_sender_id ? String(row.last_sender_id) : '',
+    }));
+  } catch (error) {
+    console.error('Error getting conversation list:', error.message);
+    throw error;
+  }
+}
+
+/**
  * Get muted conversations for a user
  */
 async function getMutedConversations(userId) {
@@ -196,6 +298,7 @@ function formatMetadata(row) {
     isPinned: row.is_pinned === 1,
     isBlocked: row.is_blocked === 1,
     isHidden: row.is_hidden === 1,
+    isUnread: row.is_unread === 1,
     updatedAt: row.updated_at?.toISOString(),
   };
 }
@@ -206,7 +309,11 @@ module.exports = {
   setPinStatus,
   setBlockStatus,
   setHiddenStatus,
+  setUnreadStatus,
   getAllMetadataForUser,
   getPinnedConversations,
   getMutedConversations,
+  getConversationList,
+  touchConversation,
+  clearConversationUnread,
 };

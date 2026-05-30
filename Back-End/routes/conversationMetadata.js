@@ -6,12 +6,52 @@ const {
   setPinStatus,
   setBlockStatus,
   setHiddenStatus,
+  setUnreadStatus,
   getAllMetadataForUser,
   getPinnedConversations,
   getMutedConversations,
+  getConversationList,
 } = require('../services/conversationMetadataService');
 
 const router = express.Router();
+
+// GET /api/conversation-metadata/conversations/list — all conversations with last message preview
+// Must be registered before /:conversationId to avoid the wildcard capturing this route.
+router.get('/conversations/list', authenticateToken, async (req, res) => {
+  try {
+    const conversations = await getConversationList(req.user.id);
+    res.json({ conversations });
+  } catch (err) {
+    console.error('Error getting conversation list:', err);
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+// POST /api/conversation-metadata/:conversationId/mark-unread — manually mark as unread
+router.post('/:conversationId/mark-unread', authenticateToken, async (req, res) => {
+  const { conversationId } = req.params;
+  try {
+    const success = await setUnreadStatus(conversationId, req.user.id, true);
+    emitMetaSync(req, conversationId, 'mark_unread', null);
+    res.json({ success, message: 'Marked as unread.' });
+  } catch (err) {
+    console.error('Error marking conversation unread:', err);
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+// POST /api/conversation-metadata/:conversationId/mark-read — clear the manual unread flag
+router.post('/:conversationId/mark-read', authenticateToken, async (req, res) => {
+  const { conversationId } = req.params;
+  try {
+    const success = await setUnreadStatus(conversationId, req.user.id, false);
+    emitMetaSync(req, conversationId, 'mark_read', null);
+    res.json({ success, message: 'Marked as read.' });
+  } catch (err) {
+    console.error('Error marking conversation read:', err);
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
 
 // GET /api/conversation-metadata/:conversationId — get metadata for a conversation
 router.get('/:conversationId', authenticateToken, async (req, res) => {

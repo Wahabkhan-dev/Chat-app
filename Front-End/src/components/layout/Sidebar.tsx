@@ -19,7 +19,7 @@ import { BRAND_FAVICON_URL } from '@/lib/brand';
 import { api, getApiBaseUrl, getToken } from '@/lib/api';
 import { getSocket } from '@/services/socket';
 import { logoutUser } from '@/services/auth';
-import { setConversationBlockStatus, emitConversationMetadataChanged } from '@/services/conversationMetadata';
+import { setConversationBlockStatus, emitConversationMetadataChanged, muteConversation, unmuteConversation, markConversationUnread, markConversationRead } from '@/services/conversationMetadata';
 import { useSignedUrl } from '@/hooks/useSignedUrl';
 import NotificationBell from './NotificationBell';
 
@@ -81,7 +81,6 @@ const ContextMenu: React.FC<{
 }> = ({ x, y, onClose, type, convId, convName, isFavourite, onToggleFavourite, hasHistory }) => {
   const { state, dispatch } = useAppContext();
   const meta = state.conversationMeta[convId] || { muted: false, pinned: false, unreadCount: 0, blocked: false };
-  const [showMuteSubmenu, setShowMuteSubmenu] = useState(false);
 
   const handleBlockChange = async (shouldBlock: boolean) => {
     try {
@@ -114,11 +113,28 @@ const ContextMenu: React.FC<{
     onClose();
   };
 
-  const handleMute = (hours: number | 'forever') => {
-    const muteUntil = hours === 'forever' ? null : new Date(Date.now() + hours * 3600000).toISOString();
-    dispatch({ type: 'MUTE_CONVERSATION', payload: { conversationId: convId, muteUntil } });
-    dispatch({ type: 'ADD_TOAST', payload: { message: `🔇 ${convName} muted ${hours === 'forever' ? 'until you turn it back on' : `for ${hours}h`}`, type: 'info' } });
-    onClose();
+  const handleToggleMute = async () => {
+    const wasMuted = meta.muted;
+    if (wasMuted) {
+      dispatch({ type: 'UNMUTE_CONVERSATION', payload: convId });
+      onClose();
+      try {
+        await unmuteConversation(convId);
+      } catch {
+        dispatch({ type: 'MUTE_CONVERSATION', payload: { conversationId: convId, muteUntil: null } });
+        dispatch({ type: 'ADD_TOAST', payload: { message: 'Failed to unmute. Try again.', type: 'error' } });
+      }
+    } else {
+      dispatch({ type: 'MUTE_CONVERSATION', payload: { conversationId: convId, muteUntil: null } });
+      dispatch({ type: 'ADD_TOAST', payload: { message: `${convName} muted.`, type: 'info' } });
+      onClose();
+      try {
+        await muteConversation(convId, null);
+      } catch {
+        dispatch({ type: 'UNMUTE_CONVERSATION', payload: convId });
+        dispatch({ type: 'ADD_TOAST', payload: { message: 'Failed to mute. Try again.', type: 'error' } });
+      }
+    }
   };
 
   const isSiteAdmin = state.currentUser?.role === 'admin';
@@ -155,31 +171,13 @@ const ContextMenu: React.FC<{
         <>
           <div className="h-px bg-border my-1" />
 
-          <div className="relative" onMouseLeave={() => setShowMuteSubmenu(false)}>
-            <button
-              onMouseEnter={() => setShowMuteSubmenu(true)}
-              onClick={() => { if (meta.muted) { dispatch({ type: 'UNMUTE_CONVERSATION', payload: convId }); onClose(); } }}
-              className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted flex items-center justify-between transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                {meta.muted ? <Volume2 className="h-3.5 w-3.5 text-primary" /> : <VolumeX className="h-3.5 w-3.5 text-muted-foreground" />}
-                {meta.muted ? 'Unmute Notifications' : 'Mute Notifications'}
-              </div>
-              {!meta.muted && <span className="text-[10px] text-muted-foreground">›</span>}
-            </button>
-            {showMuteSubmenu && !meta.muted && (
-              <div className="absolute left-full top-0 ml-1 bg-card border border-border shadow-2xl py-1.5 min-w-[160px] rounded-xl animate-in fade-in slide-in-from-left-2 z-10">
-                {[1, 8, 24].map(h => (
-                  <button key={h} onClick={() => handleMute(h)} className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted transition-colors">
-                    For {h} hour{h > 1 ? 's' : ''}
-                  </button>
-                ))}
-                <button onClick={() => handleMute('forever')} className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted transition-colors">
-                  Until I turn it back on
-                </button>
-              </div>
-            )}
-          </div>
+          <button
+            onClick={handleToggleMute}
+            className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted flex items-center gap-3 transition-colors"
+          >
+            {meta.muted ? <Volume2 className="h-3.5 w-3.5 text-primary" /> : <VolumeX className="h-3.5 w-3.5 text-muted-foreground" />}
+            {meta.muted ? 'Unmute Notifications' : 'Mute Notifications'}
+          </button>
 
           <div className="h-px bg-border my-1" />
 
@@ -202,11 +200,17 @@ const ContextMenu: React.FC<{
           <div className="h-px bg-border my-1" />
 
           <button
-            onClick={() => { dispatch({ type: meta.unreadCount > 0 ? 'MARK_CONVERSATION_READ' : 'MARK_CONVERSATION_UNREAD', payload: convId }); onClose(); }}
+            onClick={() => {
+              const markUnread = !(meta.unreadCount > 0 || meta.isManuallyUnread);
+              dispatch({ type: markUnread ? 'MARK_CONVERSATION_UNREAD' : 'MARK_CONVERSATION_READ', payload: convId });
+              if (markUnread) { markConversationUnread(convId).catch(() => dispatch({ type: 'MARK_CONVERSATION_READ', payload: convId })); }
+              else { markConversationRead(convId).catch(() => dispatch({ type: 'MARK_CONVERSATION_UNREAD', payload: convId })); }
+              onClose();
+            }}
             className="w-full px-3 py-2 text-left text-xs font-medium hover:bg-muted flex items-center gap-3 transition-colors"
           >
             <CheckCheck className="h-3.5 w-3.5 text-muted-foreground" />
-            Mark as {meta.unreadCount > 0 ? 'Read' : 'Unread'}
+            Mark as {(meta.unreadCount > 0 || meta.isManuallyUnread) ? 'Read' : 'Unread'}
           </button>
 
           {type === 'dm' ? (
@@ -285,10 +289,20 @@ const Sidebar: React.FC<{
 
   const currentUserId = String(state.currentUser?.id || '');
 
-  // Favourites = pinned conversations (uses existing persisted conversationMeta)
   const isFavourite = (convId: string) => !!(state.conversationMeta[convId]?.pinned);
-  const toggleFavourite = (convId: string) =>
-    dispatch({ type: isFavourite(convId) ? 'UNPIN_CONVERSATION' : 'PIN_CONVERSATION', payload: convId });
+
+  const toggleFavourite = async (convId: string) => {
+    const wasPinned = isFavourite(convId);
+    // Optimistic update for instant UI feedback
+    dispatch({ type: wasPinned ? 'UNPIN_CONVERSATION' : 'PIN_CONVERSATION', payload: convId });
+    try {
+      await api.post(`/conversation-metadata/${encodeURIComponent(convId)}/${wasPinned ? 'unpin' : 'pin'}`, {});
+    } catch {
+      // Revert on failure
+      dispatch({ type: wasPinned ? 'PIN_CONVERSATION' : 'UNPIN_CONVERSATION', payload: convId });
+      dispatch({ type: 'ADD_TOAST', payload: { message: 'Failed to update favourite. Try again.', type: 'error' } });
+    }
+  };
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -335,13 +349,13 @@ const Sidebar: React.FC<{
       .sort((a, b) => byRecency(a.convId, b.convId)),
     [otherActiveUsers, state.conversationMeta, currentUserId]);
 
-  // Chats section: DMs with history, NOT pinned
+  // Chats section: DMs where user has interacted (chatTracked) OR has a lastMessage, NOT pinned
   const chatItems = useMemo(() =>
     otherActiveUsers
       .filter(u => {
         const convId = getDmConvId(currentUserId, u.id);
         const meta = state.conversationMeta[convId];
-        return !!meta?.lastMessage && !meta.pinned;
+        return (meta?.chatTracked || !!meta?.lastMessage) && !meta?.pinned;
       })
       .map(u => ({ kind: 'dm' as const, convId: getDmConvId(currentUserId, u.id), user: u }))
       .sort((a, b) => byRecency(a.convId, b.convId)),
@@ -359,13 +373,13 @@ const Sidebar: React.FC<{
       }),
     [state.groups, state.conversationMeta, currentUserId]);
 
-  // Users section: no DM history and NOT pinned (pinned ones are in Favourites)
+  // Users section: no interaction yet (no chatTracked, no lastMessage) and NOT pinned
   const userItems = useMemo(() =>
     otherActiveUsers
       .filter(u => {
         const convId = getDmConvId(currentUserId, u.id);
         const meta = state.conversationMeta[convId];
-        return !meta?.lastMessage && !meta?.pinned;
+        return !meta?.chatTracked && !meta?.lastMessage && !meta?.pinned;
       })
       .sort((a, b) => a.name.localeCompare(b.name)),
     [otherActiveUsers, state.conversationMeta, currentUserId]);

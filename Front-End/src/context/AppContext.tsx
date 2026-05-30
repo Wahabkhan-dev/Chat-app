@@ -10,7 +10,7 @@ import { getCurrentUser } from '@/services/auth';
 import { api } from '@/lib/api';
 import { getToken } from '@/lib/api';
 import { loadSettings, onSettingsChanged, onSettingsCleared, UserSettings } from '@/services/settings';
-import { fetchConversationMetadata } from '@/services/conversationMetadata';
+import { fetchConversationMetadata, fetchConversationList } from '@/services/conversationMetadata';
 import { setupCrossTabSync } from '@/services/session';
 
 export type AppView = 'chat' | 'admin' | 'files' | 'settings';
@@ -57,6 +57,12 @@ export interface ConversationMeta {
   hidden: boolean;
   unreadCount: number;
   hasUnreadMention: boolean;
+  /** True when the server has a conversation_metadata row for this conversation.
+   *  Determines Chats vs Users section — set by LOAD_CONVERSATION_LIST and LOAD_MESSAGES. */
+  chatTracked?: boolean;
+  /** True when the user explicitly clicked "Mark as Unread". Stored in conversation_metadata.is_unread.
+   *  Cleared automatically when the conversation is opened. */
+  isManuallyUnread?: boolean;
   leftAt?: string;
   leftReason?: 'left' | 'removed';
   lastReadAt?: string;
@@ -69,6 +75,7 @@ export interface ConversationMeta {
 
 function normalizeServerConversationMeta(rawMeta: Record<string, any>): Record<string, ConversationMeta> {
   return Object.entries(rawMeta).reduce((acc, [conversationId, meta]) => {
+    const isManuallyUnread = Boolean(meta.isUnread);
     acc[conversationId] = {
       muted: Boolean(meta.isMuted),
       muteUntil: meta.mutedUntil || null,
@@ -78,8 +85,12 @@ function normalizeServerConversationMeta(rawMeta: Record<string, any>): Record<s
       blocked: Boolean(meta.isBlocked),
       blockedAt: meta.updatedAt || null,
       hidden: Boolean(meta.isHidden),
-      unreadCount: 0,
+      isManuallyUnread,
+      unreadCount: isManuallyUnread ? 1 : 0,
       hasUnreadMention: false,
+      // A row existing in conversation_metadata means the user has interacted with this DM.
+      // Set chatTracked so the sidebar shows it under Chats even before LOAD_CONVERSATION_LIST fires.
+      ...(conversationId.startsWith('dm_') ? { chatTracked: true } : {}),
       ...(meta.leftAt ? { leftAt: meta.leftAt } : {}),
       ...(meta.leftReason ? { leftReason: meta.leftReason } : {}),
       ...(meta.lastReadAt ? { lastReadAt: meta.lastReadAt } : {}),
@@ -238,6 +249,7 @@ type AppAction =
   | { type: 'REMOVE_UPLOADED_FILE'; payload: number }
   | { type: 'CLEAR_UPLOADED_FILES' }
   | { type: 'RESTORE_CONVERSATION_META'; payload: Record<string, ConversationMeta> }
+  | { type: 'LOAD_CONVERSATION_LIST'; payload: Array<{ conversationId: string; type: string; lastMessageAt: string | null; lastMessageContent: string; lastMessageSenderId: string }> }
   | { type: 'UPDATE_UNREAD_COUNTS'; payload: { counts: Record<string, number>; previews?: Record<string, { senderId: string; content: string; timestamp: string }> } }
   | { type: 'DISMISS_LEFT_GROUP'; payload: string }
   | { type: 'REJOIN_GROUP'; payload: Group };
@@ -367,8 +379,10 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
           ...state.conversationMeta,
           [loadConvId]: {
             ...existingLoadMeta,
+            chatTracked: true,
             unreadCount: 0,
             hasUnreadMention: false,
+            isManuallyUnread: false,
             lastReadAt: latestMsg ? latestMsg.timestamp : new Date().toISOString(),
             ...(latestMsg ? {
               lastMessage: {
@@ -729,6 +743,7 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         ...(state.conversationMeta[convId] || { muted: false, pinned: false, unreadCount: 0 }),
         unreadCount: 0,
         hasUnreadMention: false,
+        isManuallyUnread: false,
         lastReadAt: new Date().toISOString(),
       } : null;
 
@@ -943,7 +958,7 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         ...state,
         conversationMeta: {
           ...state.conversationMeta,
-          [action.payload]: { ...(state.conversationMeta[action.payload] || { muted: false, pinned: false }), unreadCount: 0, hasUnreadMention: false }
+          [action.payload]: { ...(state.conversationMeta[action.payload] || { muted: false, pinned: false }), unreadCount: 0, hasUnreadMention: false, isManuallyUnread: false }
         }
       };
     case 'MARK_CONVERSATION_UNREAD':
@@ -951,7 +966,7 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         ...state,
         conversationMeta: {
           ...state.conversationMeta,
-          [action.payload]: { ...(state.conversationMeta[action.payload] || { muted: false, pinned: false }), unreadCount: 1 }
+          [action.payload]: { ...(state.conversationMeta[action.payload] || { muted: false, pinned: false }), unreadCount: 1, isManuallyUnread: true }
         }
       };
     case 'ADD_UPLOADED_FILES':
@@ -983,6 +998,29 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         ...state,
         conversationMeta: { ...action.payload, ...state.conversationMeta }
       };
+    case 'LOAD_CONVERSATION_LIST': {
+      const convListMeta = { ...state.conversationMeta };
+      action.payload.forEach(conv => {
+        const existing = convListMeta[conv.conversationId];
+        const base = existing || { muted: false, muteUntil: null, mutedAt: null, pinned: false, pinnedAt: null, blocked: false, blockedAt: null, hidden: false, unreadCount: 0, hasUnreadMention: false };
+        const incomingTs = conv.lastMessageAt ? new Date(conv.lastMessageAt).getTime() : 0;
+        const existingTs = existing?.lastMessage?.timestamp
+          ? new Date(existing.lastMessage.timestamp).getTime()
+          : 0;
+        convListMeta[conv.conversationId] = {
+          ...base,
+          chatTracked: true,
+          ...(incomingTs >= existingTs && conv.lastMessageAt ? {
+            lastMessage: {
+              content: (conv.lastMessageContent || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1'),
+              senderId: conv.lastMessageSenderId || '',
+              timestamp: conv.lastMessageAt,
+            },
+          } : {}),
+        };
+      });
+      return { ...state, conversationMeta: convListMeta };
+    }
     case 'HYDRATE_CONVERSATION_META': {
       const hydratedMeta: Record<string, ConversationMeta> = { ...state.conversationMeta };
       Object.entries(action.payload).forEach(([conversationId, meta]) => {
@@ -1003,7 +1041,8 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         const preview = previews?.[convId];
         newMeta[convId] = {
           ...(newMeta[convId] || { muted: false, pinned: false, unreadCount: 0, hasUnreadMention: false }),
-          unreadCount: Number(count),
+          // If the user manually marked this unread, keep at least 1 even when no new messages
+          unreadCount: Math.max(Number(count), newMeta[convId]?.isManuallyUnread ? 1 : 0),
           hasUnreadMention: Number(count) > 0 ? (newMeta[convId]?.hasUnreadMention ?? false) : false,
           // Update sidebar preview with the latest message sent while offline
           ...(preview && Number(count) > 0 ? {
@@ -1088,11 +1127,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     } catch { /* parse error — ignore */ }
   }, [state.currentUser?.id]);
 
-  // Persist conversation meta to localStorage whenever it changes
+  // Persist conversation meta to localStorage — only device-specific fields.
+  // pinned/pinnedAt and lastMessage are intentionally excluded: they are server-canonical
+  // and must not be restored from a stale local cache on another device.
   useEffect(() => {
     if (!state.currentUser?.id) return;
     try {
-      localStorage.setItem(`cmeta_${state.currentUser.id}`, JSON.stringify(state.conversationMeta));
+      const metaToSave = Object.fromEntries(
+        Object.entries(state.conversationMeta).map(([id, meta]) => {
+          // Exclude server-canonical fields — they are fetched fresh on every login
+          const { pinned: _p, pinnedAt: _pa, lastMessage: _lm, chatTracked: _ct,
+                  muted: _m, muteUntil: _mu, mutedAt: _ma, isManuallyUnread: _iu, ...deviceMeta } = meta;
+          return [id, deviceMeta];
+        })
+      );
+      localStorage.setItem(`cmeta_${state.currentUser.id}`, JSON.stringify(metaToSave));
     } catch { /* storage quota exceeded */ }
   }, [state.conversationMeta, state.currentUser?.id]);
 
@@ -1120,7 +1169,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const settingsRes = await api.get<{ settings: UserSettings }>('/settings');
         if (settingsRes?.settings) {
           dispatch({ type: 'LOAD_SETTINGS', payload: settingsRes.settings });
-          console.log('[AppContext] Server settings loaded, theme:', settingsRes.settings.theme);
         }
       } catch (e) {
         console.warn('Failed to load server settings:', (e as Error).message || e);
@@ -1131,10 +1179,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const normalizedMeta = normalizeServerConversationMeta(metadataRes);
         if (Object.keys(normalizedMeta).length > 0) {
           dispatch({ type: 'HYDRATE_CONVERSATION_META', payload: normalizedMeta });
-          console.log('[AppContext] Loaded conversation metadata from server', Object.keys(normalizedMeta).length);
         }
       } catch (e) {
         console.warn('Failed to load conversation metadata:', (e as Error).message || e);
+      }
+
+      try {
+        const convList = await fetchConversationList().catch(() => []);
+        if (convList.length > 0) {
+          dispatch({ type: 'LOAD_CONVERSATION_LIST', payload: convList });
+        }
+      } catch (e) {
+        console.warn('Failed to load conversation list:', (e as Error).message || e);
       }
 
       try {
@@ -1154,7 +1210,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
         const mergedFiles = Array.from(mergedMap.values());
         dispatch({ type: 'LOAD_SHARED_FILES', payload: mergedFiles });
-        console.log('[AppContext] Loaded', mergedFiles.length, 'shared files from server');
       } catch (e) {
         console.warn('Failed to load shared files:', (e as Error).message || e);
       }
@@ -1179,8 +1234,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (user) {
           dispatch({ type: 'LOGIN', payload: normalizeUser(user) });
         }
-      } catch (err) {
-        console.error('[AppContext] Session restore failed:', err);
+      } catch {
         dispatch({ type: 'LOGOUT' });
       }
     };

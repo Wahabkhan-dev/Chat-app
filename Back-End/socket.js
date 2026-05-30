@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const pool = require('./config/database');
 const { updateLastSeen } = require('./services/messageReadsService');
+const { touchConversation } = require('./services/conversationMetadataService');
 const { checkSocketEventLimit } = require('./middleware/rateLimit');
 const crypto = require('crypto');
 require('dotenv').config();
@@ -251,6 +252,15 @@ function setupSocket(io, optimizationService) {
           status: 'sent',
         };
 
+        // Record that the sender has interacted with this conversation (moves DM to Chats list).
+        // For DMs also touch the recipient so it appears in their Chats list on their next login.
+        touchConversation(conversationId, userId).catch(() => {});
+        if (conversationId.startsWith('dm_')) {
+          const dmParts = conversationId.split('_');
+          const dmOtherId = String(dmParts[1]) === String(userId) ? dmParts[2] : dmParts[1];
+          touchConversation(conversationId, dmOtherId).catch(() => {});
+        }
+
         // Set origin_message_id on metadata records already written by /api/upload.
         // Do NOT insert again — the upload route already saved them, avoiding duplicates in shared files.
         if (fileAttachments.length > 0) {
@@ -302,6 +312,22 @@ function setupSocket(io, optimizationService) {
             });
           }
 
+          // Determine which recipients have actively muted this conversation.
+          // Muted users still receive the stored notification (bell history) but
+          // must NOT get the real-time socket event or push notification.
+          let mutedRecipientSet = new Set();
+          if (notifyRecipients.length > 0) {
+            try {
+              const [mutedRows] = await pool.query(
+                `SELECT user_id FROM conversation_metadata
+                 WHERE conversation_id = ? AND user_id IN (?) AND is_muted = 1
+                 AND (muted_until IS NULL OR muted_until > NOW())`,
+                [conversationId, notifyRecipients]
+              );
+              mutedRecipientSet = new Set(mutedRows.map((r) => String(r.user_id)));
+            } catch { /* non-fatal — if query fails, deliver to all */ }
+          }
+
           for (const recipientId of notifyRecipients) {
             const notificationId = await createNotification({
               type: conversationId.startsWith('dm_') ? 'dm_message' : 'group_message',
@@ -313,6 +339,8 @@ function setupSocket(io, optimizationService) {
               title: notificationTitle,
               body: preview,
             });
+            // Skip real-time delivery for muted recipients — they will see it via bell history
+            if (mutedRecipientSet.has(recipientId)) continue;
             socket.to(`user_${recipientId}`).emit('new_notification', {
               id: String(notificationId),
               type: conversationId.startsWith('dm_') ? 'dm_message' : 'group_message',
@@ -352,6 +380,8 @@ function setupSocket(io, optimizationService) {
               url: '/',
             };
             for (const recipientId of notifyRecipients) {
+              // Skip push for muted recipients
+              if (mutedRecipientSet.has(recipientId)) continue;
               sendPushToUser(recipientId, pushPayload).catch((err) => {
                 console.warn(`[push] dispatch failed for user ${recipientId}:`, err.message);
               });

@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
+const { touchConversation, clearConversationUnread } = require('../services/conversationMetadataService');
 
 const router = express.Router();
 
@@ -172,6 +173,12 @@ router.get('/:conversationId', authenticateToken, async (req, res) => {
     if (!access.allowed) {
       return res.status(403).json({ message: 'Access denied.' });
     }
+
+    // Record that this user has opened this conversation so it appears in their Chats list.
+    // Also clear the manual unread flag since they are now viewing it.
+    // Both are fire-and-forget — don't block message loading on these writes.
+    touchConversation(conversationId, userId).catch(() => {});
+    clearConversationUnread(conversationId, userId).catch(() => {});
 
     let query = 'SELECT * FROM messages WHERE conversation_id = ?';
     const params = [conversationId];
