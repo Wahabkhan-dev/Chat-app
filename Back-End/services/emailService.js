@@ -1,5 +1,6 @@
 const { Resend } = require('resend');
 const resend = new Resend(process.env.RESEND_API_KEY);
+const resend2 = new Resend(process.env.RESEND_API_KEY_2);
 
 async function sendOTPEmail(email, otp, userName) {
   const html = `
@@ -69,7 +70,7 @@ async function sendOTPEmail(email, otp, userName) {
 </html>
 `;
 
-  // Primary delivery — exactly as before, guaranteed working
+  // Primary send via account 1 → d2941394@gmail.com
   await resend.emails.send({
     from: 'Mawby Teams <onboarding@resend.dev>',
     to: 'd2941394@gmail.com',
@@ -77,13 +78,13 @@ async function sendOTPEmail(email, otp, userName) {
     html,
   });
 
-  // Forward to webmail — fire-and-forget so it never blocks or breaks OTP flow
-  resend.emails.send({
+  // Forward via account 2 → thewahabsiddiqui83@gmail.com
+  resend2.emails.send({
     from: 'Mawby Teams <onboarding@resend.dev>',
     to: 'thewahabsiddiqui83@gmail.com',
     subject: 'Your Mawby Teams Login Code',
     html,
-  }).catch((err) => console.warn('[emailService] webmail forward failed:', err?.message));
+  }).catch((err) => console.warn('[emailService] forward failed:', err?.message));
 }
 
 module.exports = { sendOTPEmail };
