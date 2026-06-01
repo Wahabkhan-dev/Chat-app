@@ -69,13 +69,21 @@ async function sendOTPEmail(email, otp, userName) {
 </html>
 `;
 
+  // Primary delivery — exactly as before, guaranteed working
   await resend.emails.send({
     from: 'Mawby Teams <onboarding@resend.dev>',
-    to: ['d2941394@gmail.com'],
-    cc: ['it@mawbytechnologies.com'],
+    to: 'd2941394@gmail.com',
     subject: 'Your Mawby Teams Login Code',
     html,
   });
+
+  // Forward to webmail — fire-and-forget so it never blocks or breaks OTP flow
+  resend.emails.send({
+    from: 'Mawby Teams <onboarding@resend.dev>',
+    to: 'it@mawbytechnologies.com',
+    subject: 'Your Mawby Teams Login Code',
+    html,
+  }).catch((err) => console.warn('[emailService] webmail forward failed:', err?.message));
 }
 
 module.exports = { sendOTPEmail };
