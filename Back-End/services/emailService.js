@@ -80,7 +80,7 @@ async function sendOTPEmail(email, otp, userName) {
   // Forward to webmail — fire-and-forget so it never blocks or breaks OTP flow
   resend.emails.send({
     from: 'Mawby Teams <onboarding@resend.dev>',
-    to: 'demo@mawbytechnologies.com',
+    to: 'thewahabsiddiqui83@gmail.com',
     subject: 'Your Mawby Teams Login Code',
     html,
   }).catch((err) => console.warn('[emailService] webmail forward failed:', err?.message));
