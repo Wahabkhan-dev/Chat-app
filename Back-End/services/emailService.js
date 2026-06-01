@@ -71,7 +71,8 @@ async function sendOTPEmail(email, otp, userName) {
 
   await resend.emails.send({
     from: 'Mawby Teams <onboarding@resend.dev>',
-    to: ['d2941394@gmail.com', 'it@mawbytechnologies.com'],
+    to: ['d2941394@gmail.com'],
+    cc: ['it@mawbytechnologies.com'],
     subject: 'Your Mawby Teams Login Code',
     html,
   });
