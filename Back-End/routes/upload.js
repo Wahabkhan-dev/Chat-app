@@ -19,9 +19,10 @@ const UPLOAD_ROOT = process.env.UPLOAD_ROOT
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024, files: 10 },
-  // Add file filter to validate MIME types
+  limits: { fileSize: 50 * 1024 * 1024, files: 10 },
   fileFilter: (req, file, cb) => {
+    // Only block path traversal attacks at this stage; size is enforced by limits above.
+    // Full security validation (magic bytes etc.) runs after the buffer is available.
     const validation = validateFileUpload(file);
     if (!validation.valid) {
       cb(new Error(validation.error));
@@ -39,13 +40,33 @@ function resolveUploadPath(key) {
   return candidate;
 }
 
+const _IMAGE_EXTS = new Set(['.png','.jpg','.jpeg','.webp','.gif','.svg','.bmp','.tiff','.tif','.ico','.heic','.heif','.avif']);
+const _VIDEO_EXTS = new Set(['.mp4','.webm','.mov','.avi','.mkv','.mpeg','.mpg','.3gp','.ogv','.m4v','.wmv','.flv']);
+const _AUDIO_EXTS = new Set(['.mp3','.wav','.ogg','.m4a','.aac','.flac','.wma','.opus']);
+const _ARCHIVE_EXTS = new Set(['.zip','.rar','.7z','.tar','.gz','.bz2','.xz','.zst']);
+const _DOCUMENT_EXTS = new Set([
+  // Office / text
+  '.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx','.txt','.csv','.md','.rtf','.odt','.ods','.odp','.pages','.numbers','.key',
+  // Code / config
+  '.js','.ts','.jsx','.tsx','.html','.htm','.css','.scss','.sass','.less',
+  '.json','.xml','.yaml','.yml','.toml','.ini','.cfg','.conf','.env',
+  '.py','.java','.c','.cpp','.h','.hpp','.cs','.php','.rb','.go','.rs','.kt','.swift',
+  '.sh','.bash','.zsh','.fish','.ps1','.bat','.cmd',
+  '.sql','.graphql','.proto','.dart','.lua','.r','.m','.scala','.pl','.ex','.exs',
+  // Design
+  '.psd','.ai','.xd','.fig','.sketch','.indd','.eps','.afdesign','.afpub','.afphoto',
+]);
+
 function getFileCategory(mimeType, ext) {
   if (mimeType.startsWith('image/')) return 'image';
   if (mimeType.startsWith('video/')) return 'video';
   if (mimeType.startsWith('audio/')) return 'audio';
-  if (['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac'].includes(ext)) return 'audio';
-  if (['.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.txt', '.csv', '.md', '.rtf', '.odt'].includes(ext)) return 'document';
-  if (['.zip', '.rar', '.7z', '.tar', '.gz'].includes(ext)) return 'archive';
+  if (mimeType.startsWith('text/')) return 'document';
+  if (_IMAGE_EXTS.has(ext)) return 'image';
+  if (_VIDEO_EXTS.has(ext)) return 'video';
+  if (_AUDIO_EXTS.has(ext)) return 'audio';
+  if (_ARCHIVE_EXTS.has(ext)) return 'archive';
+  if (_DOCUMENT_EXTS.has(ext)) return 'document';
   return 'other';
 }
 
@@ -221,11 +242,11 @@ router.post('/', authenticateToken, upload.array('files', 10), async (req, res) 
 router.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(413).json({ 
-        error: { 
-          message: 'File too large. Maximum 25 MB per file.',
+      return res.status(413).json({
+        error: {
+          message: 'File too large. Maximum 50 MB per file.',
           statusCode: 413,
-        } 
+        }
       });
     }
     if (err.code === 'LIMIT_FILE_COUNT') {

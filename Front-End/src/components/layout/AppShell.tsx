@@ -96,7 +96,19 @@ const AppShell: React.FC = () => {
 
   const isAdmin = state.currentUser?.role === 'admin';
 
+  // Admins must always stay on admin/settings views — enforce on every render cycle
+  useEffect(() => {
+    if (isAdmin && state.activeView !== 'admin' && state.activeView !== 'settings') {
+      dispatch({ type: 'SET_ACTIVE_VIEW', payload: 'admin' });
+    }
+  }, [isAdmin, state.activeView, dispatch]);
+
   const renderContent = () => {
+    if (isAdmin) {
+      // Admins only see the admin portal or their own settings
+      if (state.activeView === 'settings') return <ErrorBoundary><SettingsPage /></ErrorBoundary>;
+      return <ErrorBoundary><AdminDashboard /></ErrorBoundary>;
+    }
     switch (state.activeView) {
       case 'chat':
         return (
@@ -139,33 +151,29 @@ const AppShell: React.FC = () => {
       ref={appRef}
       className="flex h-[100dvh] w-full bg-background text-foreground overflow-hidden"
     >
-      {/* ── Sidebar / Conversation List ── */}
-      {/*
-        Desktop  : always visible, fixed 280px column
-        Mobile   : full-width "page", visible only when showSidebar is true
-      */}
-      <div
-        className={cn(
-          'flex-col overflow-hidden transition-none',
-          // Desktop: always visible column
-          'md:flex md:w-[280px] md:shrink-0 md:border-r md:border-border',
-          // Mobile: full-width, conditional
-          showSidebar ? 'flex w-full' : 'hidden md:flex',
-        )}
-      >
-        <ErrorBoundary>
-          <Sidebar
-            onViewChange={(view) => dispatch({ type: 'SET_ACTIVE_VIEW', payload: view })}
-            onCreateGroup={() => dispatch({ type: 'OPEN_MODAL', payload: { type: 'createGroup' } })}
-            activeView={state.activeView}
-            onConversationSelect={() => {
-              if (typeof window !== 'undefined' && window.innerWidth < 768) {
-                setMobileSidebarOpen(false);
-              }
-            }}
-          />
-        </ErrorBoundary>
-      </div>
+      {/* ── Sidebar / Conversation List — hidden for admin users ── */}
+      {!isAdmin && (
+        <div
+          className={cn(
+            'flex-col overflow-hidden transition-none',
+            'md:flex md:w-[280px] md:shrink-0 md:border-r md:border-border',
+            showSidebar ? 'flex w-full' : 'hidden md:flex',
+          )}
+        >
+          <ErrorBoundary>
+            <Sidebar
+              onViewChange={(view) => dispatch({ type: 'SET_ACTIVE_VIEW', payload: view })}
+              onCreateGroup={() => dispatch({ type: 'OPEN_MODAL', payload: { type: 'createGroup' } })}
+              activeView={state.activeView}
+              onConversationSelect={() => {
+                if (typeof window !== 'undefined' && window.innerWidth < 768) {
+                  setMobileSidebarOpen(false);
+                }
+              }}
+            />
+          </ErrorBoundary>
+        </div>
+      )}
 
       {/* ── Main content area ── */}
       {/*
@@ -178,9 +186,11 @@ const AppShell: React.FC = () => {
           showSidebar ? 'hidden md:flex' : 'flex',
         )}
       >
-        <TopBar
-          onCreateUser={() => dispatch({ type: 'OPEN_MODAL', payload: { type: 'createUser' } })}
-        />
+        {!isAdmin && (
+          <TopBar
+            onCreateUser={() => dispatch({ type: 'OPEN_MODAL', payload: { type: 'createUser' } })}
+          />
+        )}
 
         {/* View content — shrinks above mobile bottom nav */}
         <div className="flex-1 flex overflow-hidden relative pb-0 md:pb-0">
@@ -189,51 +199,65 @@ const AppShell: React.FC = () => {
 
         {/* ── Mobile Bottom Navigation (Teams-style) ── */}
         <div className="md:hidden flex items-center justify-around shrink-0 h-16 bg-card border-t border-border safe-bottom z-40">
-          <button
-            onClick={() => handleBottomNavChange('chat')}
-            className={cn(
-              'flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-colors',
-              state.activeView === 'chat' ? 'text-primary' : 'text-muted-foreground',
-            )}
-          >
-            <MessageSquare className="h-5 w-5" />
-            <span className="text-[10px] font-bold uppercase tracking-wide">Chat</span>
-          </button>
-
-          <button
-            onClick={() => handleBottomNavChange('files')}
-            className={cn(
-              'flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-colors',
-              state.activeView === 'files' ? 'text-primary' : 'text-muted-foreground',
-            )}
-          >
-            <FileText className="h-5 w-5" />
-            <span className="text-[10px] font-bold uppercase tracking-wide">Files</span>
-          </button>
-
-          {isAdmin && (
-            <button
-              onClick={() => handleBottomNavChange('admin')}
-              className={cn(
-                'flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-colors',
-                state.activeView === 'admin' ? 'text-primary' : 'text-muted-foreground',
-              )}
-            >
-              <Shield className="h-5 w-5" />
-              <span className="text-[10px] font-bold uppercase tracking-wide">Admin</span>
-            </button>
+          {isAdmin ? (
+            // Admins only see Admin Portal + Settings
+            <>
+              <button
+                onClick={() => handleBottomNavChange('admin')}
+                className={cn(
+                  'flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-colors',
+                  state.activeView === 'admin' ? 'text-primary' : 'text-muted-foreground',
+                )}
+              >
+                <Shield className="h-5 w-5" />
+                <span className="text-[10px] font-bold uppercase tracking-wide">Admin</span>
+              </button>
+              <button
+                onClick={() => handleBottomNavChange('settings')}
+                className={cn(
+                  'flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-colors',
+                  state.activeView === 'settings' ? 'text-primary' : 'text-muted-foreground',
+                )}
+              >
+                <Settings className="h-5 w-5" />
+                <span className="text-[10px] font-bold uppercase tracking-wide">Settings</span>
+              </button>
+            </>
+          ) : (
+            // Regular users see Chat + Files + Settings
+            <>
+              <button
+                onClick={() => handleBottomNavChange('chat')}
+                className={cn(
+                  'flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-colors',
+                  state.activeView === 'chat' ? 'text-primary' : 'text-muted-foreground',
+                )}
+              >
+                <MessageSquare className="h-5 w-5" />
+                <span className="text-[10px] font-bold uppercase tracking-wide">Chat</span>
+              </button>
+              <button
+                onClick={() => handleBottomNavChange('files')}
+                className={cn(
+                  'flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-colors',
+                  state.activeView === 'files' ? 'text-primary' : 'text-muted-foreground',
+                )}
+              >
+                <FileText className="h-5 w-5" />
+                <span className="text-[10px] font-bold uppercase tracking-wide">Files</span>
+              </button>
+              <button
+                onClick={() => handleBottomNavChange('settings')}
+                className={cn(
+                  'flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-colors',
+                  state.activeView === 'settings' ? 'text-primary' : 'text-muted-foreground',
+                )}
+              >
+                <Settings className="h-5 w-5" />
+                <span className="text-[10px] font-bold uppercase tracking-wide">Settings</span>
+              </button>
+            </>
           )}
-
-          <button
-            onClick={() => handleBottomNavChange('settings')}
-            className={cn(
-              'flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-colors',
-              state.activeView === 'settings' ? 'text-primary' : 'text-muted-foreground',
-            )}
-          >
-            <Settings className="h-5 w-5" />
-            <span className="text-[10px] font-bold uppercase tracking-wide">Settings</span>
-          </button>
         </div>
       </div>
 

@@ -16,9 +16,33 @@ import { toast } from '@/hooks/use-toast';
 
 const COMMON_EMOJIS = ['😀', '😂', '😊', '😍', '👍', '🙌', '🔥', '✨', '🚀', '💡', '✅', '❌', '👋', '🎉', '🙏', '💯'];
 
+const IMAGE_EXTS = new Set(['png','jpg','jpeg','webp','gif','svg','bmp','tiff','tif','ico','heic','heif','avif']);
+const VIDEO_EXTS = new Set(['mp4','webm','mov','avi','mkv','mpeg','mpg','3gp','ogv','m4v','wmv','flv']);
+const AUDIO_EXTS = new Set(['mp3','wav','ogg','m4a','aac','flac','wma','opus']);
+const ARCHIVE_EXTS = new Set(['zip','rar','7z','tar','gz','bz2','xz','zst']);
+const DOCUMENT_EXTS = new Set([
+  'pdf','doc','docx','xls','xlsx','ppt','pptx','txt','csv','md','rtf','odt','ods','odp','pages','numbers','key',
+  'js','ts','jsx','tsx','html','htm','css','scss','sass','less',
+  'json','xml','yaml','yml','toml','ini','cfg','conf','env',
+  'py','java','c','cpp','h','hpp','cs','php','rb','go','rs','kt','swift',
+  'sh','bash','zsh','fish','ps1','bat','cmd',
+  'sql','graphql','proto','dart','lua','r','m','scala','pl','ex','exs',
+  'psd','ai','xd','fig','sketch','indd','eps','afdesign','afpub','afphoto',
+]);
+
+export function getFileCategory(ext: string): string {
+  const e = ext.toLowerCase().replace(/^\./, '');
+  if (IMAGE_EXTS.has(e)) return 'image';
+  if (VIDEO_EXTS.has(e)) return 'video';
+  if (AUDIO_EXTS.has(e)) return 'audio';
+  if (ARCHIVE_EXTS.has(e)) return 'archive';
+  if (DOCUMENT_EXTS.has(e)) return 'document';
+  return 'other';
+}
+
 const EVERYONE_OPTION = { id: 'everyone', name: 'everyone', department: 'Mention everyone', status: 'online' as const, avatar: undefined as string | undefined };
 
-const MessageInput: React.FC = () => {
+const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ onFileError }) => {
   const { state, dispatch } = useAppContext();
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -77,28 +101,24 @@ const MessageInput: React.FC = () => {
       return;
     }
 
-    const largeFile = fileList.find(f => f.size > 25 * 1024 * 1024);
+    const largeFile = fileList.find(f => f.size > 50 * 1024 * 1024);
     if (largeFile) {
-      dispatch({ type: 'ADD_TOAST', payload: { message: 'Max file size 25MB', type: 'error' } });
+      const msg = `"${largeFile.name}" exceeds the 50 MB file size limit.`;
+      if (onFileError) onFileError(msg);
+      else dispatch({ type: 'ADD_TOAST', payload: { message: 'Max file size 50MB', type: 'error' } });
       return;
     }
 
     const newFiles = fileList.map(file => {
-      const ext = file.name.split('.').pop()?.toLowerCase() || '';
-      let category = 'other';
-      if (['png','jpg','jpeg','webp','gif'].includes(ext)) category = 'image';
-      else if (['mp4','webm','mov'].includes(ext)) category = 'video';
-      else if (['mp3','wav','ogg','m4a','aac','flac'].includes(ext)) category = 'audio';
-      else if (['pdf','docx','xlsx','pptx','txt','md','rtf','odt'].includes(ext)) category = 'document';
-      else if (['zip','rar','7z','tar','gz'].includes(ext)) category = 'archive';
-
+      const ext = file.name.split('.').pop() || '';
+      const category = getFileCategory(ext);
       return {
         file,
         previewUrl: URL.createObjectURL(file),
         name: file.name,
         size: `${(file.size / 1024).toFixed(1)} KB`,
         type: category,
-        mimeType: file.type
+        mimeType: file.type,
       };
     });
 
@@ -128,9 +148,11 @@ const MessageInput: React.FC = () => {
     // Upload files to Cloudflare R2 before emitting the socket event
     let r2Files: { key: string; name: string; size: string; type: string; mimeType?: string }[] = [];
     if (uploadedFiles.length > 0) {
+      dispatch({ type: 'SET_UPLOADING', payload: true });
       try {
         r2Files = await uploadFilesToR2(uploadedFiles.map(f => f.file), activeConversation.id);
       } catch (err: any) {
+        dispatch({ type: 'SET_UPLOADING', payload: false });
         toast({
           title: 'Upload failed',
           description: err.message || 'Could not upload files. Please try again.',
@@ -139,6 +161,7 @@ const MessageInput: React.FC = () => {
         setIsSending(false);
         return;
       }
+      dispatch({ type: 'SET_UPLOADING', payload: false });
     }
 
     socket.emit(

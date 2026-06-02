@@ -61,17 +61,20 @@ export function useSocket() {
         let groups: any[] = [];
 
         if (usersRes.status === 'fulfilled') {
-          users = usersRes.value.users.map((u: any) => ({
-            id: String(u.id),
-            name: u.name,
-            email: u.email,
-            role: u.role,
-            avatar: u.avatar || '',
-            status: u.status || 'offline',
-            department: u.department || '',
-            createdAt: u.created_at ? String(u.created_at) : new Date().toISOString(),
-            isActive: u.is_active === 1,
-          }));
+          const currentUserRole = stateRef.current.currentUser?.role;
+          users = usersRes.value.users
+            .filter((u: any) => currentUserRole === 'admin' || u.role !== 'admin')
+            .map((u: any) => ({
+              id: String(u.id),
+              name: u.name,
+              email: u.email,
+              role: u.role,
+              avatar: u.avatar || '',
+              status: u.status || 'offline',
+              department: u.department || '',
+              createdAt: u.created_at ? String(u.created_at) : new Date().toISOString(),
+              isActive: u.is_active === 1,
+            }));
           dispatch({ type: 'SET_USERS', payload: users });
         } else {
           console.error('[useSocket] failed to load users:', usersRes.reason);
@@ -589,10 +592,42 @@ export function useSocket() {
         },
       });
 
-      toast({ title: notif.title, description: notif.body });
+      // Play notification sound if the user hasn't disabled it
+      if (s.userSettings?.soundEnabled !== false) {
+        playNotificationSound();
+      }
+
+      // Message notifications: show the custom in-app card (MessageNotificationToast)
+      // Other notifications: fall back to the shadcn toast
+      if (isMessageNotification && notif.conversationId) {
+        const senderUser = notif.senderId ? s.users.find(u => u.id === String(notif.senderId)) : null;
+        const isDm = notif.type === 'dm_message';
+        const conversationName = isDm
+          ? (senderUser?.name || notif.title)
+          : (s.groups.find(g => g.id === String(notif.conversationId))?.name || notif.title);
+        dispatch({
+          type: 'PUSH_IN_APP_NOTIFICATION',
+          payload: {
+            id: String(notif.id),
+            conversationId: String(notif.conversationId),
+            conversationName,
+            conversationType: isDm ? 'dm' : 'group',
+            senderName: senderUser?.name || notif.title,
+            senderAvatar: senderUser?.avatar || '',
+            message: notif.body,
+            timestamp: notif.timestamp || new Date().toISOString(),
+          },
+        });
+      } else {
+        toast({ title: notif.title, description: notif.body });
+      }
     });
 
     socket.on('new_user', ({ user }) => {
+      // Don't surface new admin accounts to regular chat users
+      const currentUserRole = stateRef.current.currentUser?.role;
+      if (user.role === 'admin' && currentUserRole !== 'admin') return;
+
       const newUser = {
         id: String(user.id),
         name: user.name,

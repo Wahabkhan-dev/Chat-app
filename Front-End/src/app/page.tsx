@@ -31,6 +31,11 @@ export default function Home() {
           },
         });
 
+        // Send admin users directly to the admin portal on every load
+        if (user.role === 'admin') {
+          dispatch({ type: 'SET_ACTIVE_VIEW', payload: 'admin' });
+        }
+
         pushOnLogin(String(user.id));
       }
       if (!user) {

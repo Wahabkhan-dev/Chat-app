@@ -117,7 +117,7 @@ function setupSocket(io, optimizationService) {
         [decoded.id]
       );
       if (!rows.length) return next(new Error('User not found'));
-      socket.user = { ...decoded, name: rows[0].name, avatar: rows[0].avatar };
+      socket.user = { ...decoded, name: rows[0].name, avatar: rows[0].avatar, role: rows[0].role };
       next();
     } catch {
       next(new Error('Invalid token'));
@@ -135,9 +135,11 @@ function setupSocket(io, optimizationService) {
     // Wrap the entire async setup so an unhandled rejection never crashes the process
     (async () => {
       try {
-        // Mark online
+        // Mark online — admins do not broadcast presence to chat users
         await pool.query('UPDATE users SET status = ? WHERE id = ?', ['online', userId]);
-        socket.broadcast.emit('user_status_change', { userId: String(userId), status: 'online' });
+        if (socket.user.role !== 'admin') {
+          socket.broadcast.emit('user_status_change', { userId: String(userId), status: 'online' });
+        }
 
         // Join personal room for notifications
         socket.join(`user_${userId}`);
@@ -176,6 +178,11 @@ function setupSocket(io, optimizationService) {
 
     // Send message
     socket.on('send_message', async ({ conversationId, content, type = 'text', replyTo, files }, callback) => {
+      // Admins are portal-only — they cannot participate in chat
+      if (socket.user.role === 'admin') {
+        return callback?.({ success: false, error: 'Administrator accounts cannot send chat messages.' });
+      }
+
       // Rate limiting
       if (!checkSocketEventLimit(userId, 'send_message')) {
         return callback?.({ success: false, error: 'Too many messages. Please slow down.' });
@@ -274,9 +281,10 @@ function setupSocket(io, optimizationService) {
         // Broadcast to everyone in the room EXCEPT the sender
         socket.to(conversationId).emit('new_message', { conversationId, message });
 
-        // Persist a message notification for recipients so it survives refresh/relogin.
-        // Declared outside the try block so the push block below can access it.
+        // Both notifyRecipients and mutedRecipientSet are declared here so the
+        // push try-block below can access them (let is block-scoped).
         let notifyRecipients = [];
+        let mutedRecipientSet = new Set();
         try {
           const [senderRows] = await pool.query('SELECT name FROM users WHERE id = ? AND is_active = 1', [userId]);
           const senderName = senderRows[0]?.name || 'Someone';
@@ -315,7 +323,7 @@ function setupSocket(io, optimizationService) {
           // Determine which recipients have actively muted this conversation.
           // Muted users still receive the stored notification (bell history) but
           // must NOT get the real-time socket event or push notification.
-          let mutedRecipientSet = new Set();
+          mutedRecipientSet = new Set();
           if (notifyRecipients.length > 0) {
             try {
               const [mutedRows] = await pool.query(
@@ -498,7 +506,9 @@ socket.on('typing', async ({ conversationId }) => {
 
       try {
         await pool.query('UPDATE users SET status = ? WHERE id = ?', [status, userId]);
-        socket.broadcast.emit('user_status_change', { userId: String(userId), status });
+        if (socket.user.role !== 'admin') {
+          socket.broadcast.emit('user_status_change', { userId: String(userId), status });
+        }
         callback?.({ success: true });
       } catch (err) {
         console.error('[update_presence] error:', err);
@@ -1079,7 +1089,12 @@ socket.on('typing', async ({ conversationId }) => {
 
     socket.on('disconnect', () => {
       pool.query('UPDATE users SET status = ? WHERE id = ?', ['offline', userId])
-        .then(() => socket.broadcast.emit('user_status_change', { userId: String(userId), status: 'offline' }))
+        .then(() => {
+          // Admins do not broadcast presence to chat users
+          if (socket.user.role !== 'admin') {
+            socket.broadcast.emit('user_status_change', { userId: String(userId), status: 'offline' });
+          }
+        })
         .catch((err) => console.error(`[socket] disconnect error for user ${userId}:`, err.message));
       
       // Clean up resources

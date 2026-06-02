@@ -1,105 +1,60 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React from 'react';
 import { X, MessageSquare } from 'lucide-react';
 import { useAppContext, InAppNotification } from '@/context/AppContext';
 import { cn } from '@/lib/utils';
 import { Avatar } from '@/components/ui/avatar';
-import { formatDistanceToNow } from 'date-fns';
-
-const DURATION = 5000;
 
 const NotificationCard: React.FC<{
   notification: InAppNotification;
   onDismiss: () => void;
   onClick: () => void;
-}> = ({ notification, onDismiss, onClick }) => {
-  const [progress, setProgress] = useState(100);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startRef = useRef(Date.now());
-
-  useEffect(() => {
-    startRef.current = Date.now();
-    intervalRef.current = setInterval(() => {
-      const elapsed = Date.now() - startRef.current;
-      const remaining = Math.max(0, 100 - (elapsed / DURATION) * 100);
-      setProgress(remaining);
-      if (remaining === 0) {
-        if (intervalRef.current) clearInterval(intervalRef.current);
-        onDismiss();
-      }
-    }, 50);
-
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [onDismiss]);
-
-  const timeAgo = (() => {
-    try {
-      return formatDistanceToNow(new Date(notification.timestamp), { addSuffix: true });
-    } catch {
-      return 'just now';
-    }
-  })();
-
-  return (
-    <div
-      className={cn(
-        'relative w-[320px] rounded-2xl shadow-2xl overflow-hidden cursor-pointer',
-        'bg-card border border-border/60',
-        'animate-in slide-in-from-right-4 fade-in duration-300',
-      )}
-      onClick={onClick}
-    >
-      {/* Header bar */}
-      <div className="flex items-center justify-between px-3 py-2 bg-primary/10 border-b border-border/40">
-        <div className="flex items-center gap-2">
-          <MessageSquare className="h-3.5 w-3.5 text-primary" />
-          <span className="text-[11px] font-bold text-primary uppercase tracking-widest">Mawby Teams</span>
-          {notification.conversationType === 'group' && (
-            <span className="text-[10px] text-muted-foreground font-medium truncate max-w-[100px]">
-              · {notification.conversationName}
-            </span>
-          )}
-        </div>
-        <button
-          className="p-1 rounded-full hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-          onClick={e => { e.stopPropagation(); onDismiss(); }}
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+}> = ({ notification, onDismiss, onClick }) => (
+  <div
+    className={cn(
+      'relative w-[320px] rounded-2xl shadow-2xl overflow-hidden cursor-pointer',
+      'bg-card border border-border/60',
+      'animate-in slide-in-from-right-4 fade-in duration-300',
+    )}
+    onClick={onClick}
+  >
+    {/* Header bar */}
+    <div className="flex items-center justify-between px-3 py-2 bg-primary/10 border-b border-border/40">
+      <div className="flex items-center gap-2">
+        <MessageSquare className="h-3.5 w-3.5 text-primary" />
+        <span className="text-[11px] font-bold text-primary uppercase tracking-widest">Mawby Teams</span>
+        {notification.conversationType === 'group' && (
+          <span className="text-[10px] text-muted-foreground font-medium truncate max-w-[100px]">
+            · {notification.conversationName}
+          </span>
+        )}
       </div>
+      <button
+        className="p-1 rounded-full hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+        onClick={e => { e.stopPropagation(); onDismiss(); }}
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
 
-      {/* Body */}
-      <div className="flex items-start gap-3 px-3 py-3">
-        <Avatar
-          name={notification.senderName}
-          src={notification.senderAvatar}
-          size="lg"
-          className="shrink-0 shadow-md"
-        />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-bold text-foreground truncate">{notification.senderName}</p>
-            <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo}</span>
-          </div>
-          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">
-            {notification.message}
-          </p>
-        </div>
-      </div>
-
-      {/* Progress bar */}
-      <div className="h-0.5 bg-muted">
-        <div
-          className="h-full bg-primary transition-none"
-          style={{ width: `${progress}%` }}
-        />
+    {/* Body */}
+    <div className="flex items-start gap-3 px-3 py-3">
+      <Avatar
+        name={notification.senderName}
+        src={notification.senderAvatar}
+        size="lg"
+        className="shrink-0 shadow-md"
+      />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-bold text-foreground truncate">{notification.senderName}</p>
+        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">
+          {notification.message}
+        </p>
       </div>
     </div>
-  );
-};
+  </div>
+);
 
 const MessageNotificationToast: React.FC = () => {
   const { state, dispatch } = useAppContext();
@@ -115,10 +70,6 @@ const MessageNotificationToast: React.FC = () => {
       },
     });
     dispatch({ type: 'DISMISS_IN_APP_NOTIFICATION', payload: notif.id });
-    if (notif.conversationType === 'dm') {
-      const socket = (window as any).__socket;
-      // join_dm is handled via sidebar click, no action needed here
-    }
   };
 
   const handleDismiss = (id: string) => {

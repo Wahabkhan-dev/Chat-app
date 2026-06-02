@@ -329,7 +329,7 @@ const SettingsPage: React.FC = () => {
                     {state.currentUser?.email}
                   </div>
                 </div>
-                <div className="space-y-2.5">
+                <div className="space-y-2.5 md:col-span-2">
                   <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Department</Label>
                   {isAdmin ? (
                     <Input
@@ -342,12 +342,6 @@ const SettingsPage: React.FC = () => {
                       {state.currentUser?.department || '—'}
                     </div>
                   )}
-                </div>
-                <div className="space-y-2.5">
-                  <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Professional Title</Label>
-                  <div className="rounded-xl bg-muted/30 border border-border h-12 px-4 flex items-center text-sm font-medium text-foreground">
-                    {profileData.title || '—'}
-                  </div>
                 </div>
               </div>
             </div>

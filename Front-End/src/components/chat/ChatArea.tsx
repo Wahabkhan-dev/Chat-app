@@ -6,14 +6,14 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/lib/api';
 import { getSocket } from '@/services/socket';
-import { Search, Info, X, ChevronDown, VolumeX, Lock, Pin, ArrowLeft } from 'lucide-react';
+import { Search, Info, X, ChevronDown, VolumeX, Lock, Pin, ArrowLeft, Loader2 } from 'lucide-react';
 import { Avatar } from '../ui/avatar';
 import MessageBubble from './MessageBubble';
 import { Message } from '@/mock/messages';
 import { format, isToday, isYesterday, isThisWeek } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
-import MessageInput from './MessageInput';
+import MessageInput, { getFileCategory } from './MessageInput';
 import { Badge } from '@/components/ui/badge';
 import Image from 'next/image';
 import { BRAND_LOGO_URL, BRAND_LOGO_DARK_URL } from '@/lib/brand';
@@ -40,6 +40,8 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const { state, dispatch } = useAppContext();
   const [isDragging, setIsDragging] = useState(false);
   const [showScrollPill, setShowScrollPill] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const uploadErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
@@ -181,26 +183,41 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     setShowScrollPill(!isAtBottom);
   };
 
+  const showUploadError = (message: string) => {
+    setUploadError(message);
+    if (uploadErrorTimer.current) clearTimeout(uploadErrorTimer.current);
+    uploadErrorTimer.current = setTimeout(() => setUploadError(null), 4000);
+  };
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    
-    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
-    if (files.length === 0) return;
 
-    if (state.chatUI.uploadedFiles.length + files.length > 5) {
-      dispatch({ type: 'ADD_TOAST', payload: { message: 'Max 5 images per message', type: 'error' } });
+    const fileList = Array.from(e.dataTransfer.files);
+    if (fileList.length === 0) return;
+
+    if (state.chatUI.uploadedFiles.length + fileList.length > 10) {
+      showUploadError('You can attach a maximum of 10 files per message.');
       return;
     }
 
-    const newFiles = files.map(file => ({
-      file,
-      previewUrl: URL.createObjectURL(file),
-      name: file.name,
-      size: `${(file.size / 1024).toFixed(1)} KB`,
-      type: 'image',
-      mimeType: file.type,
-    }));
+    const largeFile = fileList.find(f => f.size > 50 * 1024 * 1024);
+    if (largeFile) {
+      showUploadError(`"${largeFile.name}" exceeds the 50 MB file size limit.`);
+      return;
+    }
+
+    const newFiles = fileList.map(file => {
+      const ext = file.name.split('.').pop() || '';
+      return {
+        file,
+        previewUrl: URL.createObjectURL(file),
+        name: file.name,
+        size: `${(file.size / 1024).toFixed(1)} KB`,
+        type: getFileCategory(ext),
+        mimeType: file.type,
+      };
+    });
 
     dispatch({ type: 'ADD_UPLOADED_FILES', payload: newFiles });
   };
@@ -219,12 +236,23 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   }
 
   return (
-    <div 
-      className={cn("flex-1 flex flex-col bg-background overflow-hidden relative transition-all", isDragging && "bg-primary/5 ring-4 ring-inset ring-primary/20")}
+    <div
+      className="flex-1 flex flex-col bg-background overflow-hidden relative transition-all"
       onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-      onDragLeave={() => setIsDragging(false)}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragging(false); }}
       onDrop={handleDrop}
     >
+      {isDragging && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-primary/10 border-4 border-dashed border-primary/50 rounded-lg pointer-events-none">
+          <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+          </div>
+          <p className="text-lg font-bold text-primary">Drop files to upload</p>
+          <p className="text-sm text-primary/70 mt-1">Images, PDFs, videos, documents — up to 50 MB each</p>
+        </div>
+      )}
       {/* Header */}
       <div className="h-14 border-b border-border bg-card text-card-foreground flex items-center justify-between px-3 md:px-6 shrink-0 z-20 shadow-sm gap-1">
         {/* Back button — mobile only */}
@@ -289,6 +317,27 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
           </button>
         </div>
       </div>
+
+      {/* File upload progress banner */}
+      {state.chatUI.isUploading && (
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-primary/10 border-b border-primary/20 animate-in slide-in-from-top-1 z-10">
+          <Loader2 className="h-4 w-4 text-primary animate-spin shrink-0" />
+          <p className="text-sm text-primary font-medium flex-1">Uploading files — please wait…</p>
+        </div>
+      )}
+
+      {/* File size error banner */}
+      {uploadError && (
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-destructive/10 border-b border-destructive/20 animate-in slide-in-from-top-1 z-10">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-destructive shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          </svg>
+          <p className="text-sm text-destructive font-medium flex-1">{uploadError}</p>
+          <button onClick={() => setUploadError(null)} className="p-0.5 rounded hover:bg-destructive/20 transition-colors">
+            <X className="h-3.5 w-3.5 text-destructive" />
+          </button>
+        </div>
+      )}
 
       {/* Search Bar */}
       {state.chatUI.isSearchActive && (
@@ -394,7 +443,7 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         </button>
       )}
 
-      <MessageInput />
+      <MessageInput onFileError={showUploadError} />
     </div>
   );
 };

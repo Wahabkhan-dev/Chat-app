@@ -164,6 +164,7 @@ interface AppState {
     searchQuery: string;
     isSearchActive: boolean;
     uploadedFiles: UploadedFile[];
+    isUploading: boolean;
   };
   rightPanel: {
     open: boolean;
@@ -248,6 +249,7 @@ type AppAction =
   | { type: 'ADD_UPLOADED_FILES'; payload: UploadedFile[] }
   | { type: 'REMOVE_UPLOADED_FILE'; payload: number }
   | { type: 'CLEAR_UPLOADED_FILES' }
+  | { type: 'SET_UPLOADING'; payload: boolean }
   | { type: 'RESTORE_CONVERSATION_META'; payload: Record<string, ConversationMeta> }
   | { type: 'LOAD_CONVERSATION_LIST'; payload: Array<{ conversationId: string; type: string; lastMessageAt: string | null; lastMessageContent: string; lastMessageSenderId: string }> }
   | { type: 'UPDATE_UNREAD_COUNTS'; payload: { counts: Record<string, number>; previews?: Record<string, { senderId: string; content: string; timestamp: string }> } }
@@ -277,11 +279,12 @@ const initialState: AppState = {
   modalData: null,
   toasts: [],
   mediaGallery: { open: false, items: [], currentIndex: 0 },
-  chatUI: { 
-    editingMessageId: null, 
-    searchQuery: '', 
+  chatUI: {
+    editingMessageId: null,
+    searchQuery: '',
     isSearchActive: false,
-    uploadedFiles: []
+    uploadedFiles: [],
+    isUploading: false,
   },
   rightPanel: {
     open: false,
@@ -752,7 +755,7 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         activeConversation: resolvedPayload,
         activeView: resolvedPayload ? 'chat' : state.activeView,
         conversationMeta: convId ? { ...state.conversationMeta, [convId]: newMeta! } : state.conversationMeta,
-        chatUI: { ...state.chatUI, isSearchActive: false, searchQuery: '', uploadedFiles: [] }
+        chatUI: { ...state.chatUI, isSearchActive: false, searchQuery: '', uploadedFiles: [], isUploading: false }
       };
     }
     case 'PIN_CONVERSATION':
@@ -990,8 +993,14 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         ...state,
         chatUI: {
           ...state.chatUI,
-          uploadedFiles: []
+          uploadedFiles: [],
+          isUploading: false,
         }
+      };
+    case 'SET_UPLOADING':
+      return {
+        ...state,
+        chatUI: { ...state.chatUI, isUploading: action.payload }
       };
     case 'RESTORE_CONVERSATION_META':
       return {

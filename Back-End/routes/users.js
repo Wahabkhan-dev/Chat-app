@@ -13,12 +13,15 @@ const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSiz
 const router = express.Router();
 const sessionService = require('../services/sessionService');
 
-// GET /api/users/directory — all users (active + inactive) for directory and DM list
+// GET /api/users/directory — users for directory and DM list
+// Admin users are excluded so they never appear as chat participants for regular users.
+// Admin callers still see all users (needed for their own portal context).
 router.get('/directory', authenticateToken, async (req, res) => {
   try {
-    const [rows] = await pool.query(
-      'SELECT id, name, email, role, avatar, status, department, is_active, created_at FROM users ORDER BY name ASC'
-    );
+    const callerIsAdmin = req.user.role === 'admin';
+    const [rows] = callerIsAdmin
+      ? await pool.query('SELECT id, name, email, role, avatar, status, department, is_active, created_at FROM users ORDER BY name ASC')
+      : await pool.query("SELECT id, name, email, role, avatar, status, department, is_active, created_at FROM users WHERE role != 'admin' ORDER BY name ASC");
     res.json({ users: rows });
   } catch (err) {
     console.error(err);
@@ -37,12 +40,14 @@ router.get('/search/:query', authenticateToken, async (req, res) => {
 
   try {
     const searchTerm = `%${query.toLowerCase()}%`;
+    const callerIsAdmin = req.user.role === 'admin';
     const [rows] = await pool.query(
-      `SELECT id, name, email, role, avatar, status, department, is_active, created_at 
-       FROM users 
-       WHERE is_active = 1 
+      `SELECT id, name, email, role, avatar, status, department, is_active, created_at
+       FROM users
+       WHERE is_active = 1
          AND (LOWER(name) LIKE ? OR LOWER(email) LIKE ? OR LOWER(department) LIKE ?)
-       ORDER BY 
+         ${callerIsAdmin ? '' : "AND role != 'admin'"}
+       ORDER BY
          CASE WHEN LOWER(name) LIKE ? THEN 0 ELSE 1 END,
          name ASC
        LIMIT ?`,
