@@ -419,8 +419,8 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
         <form
           onSubmit={handleSendMessage}
           className="flex flex-col"
-          onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
-          onDrop={e => { e.preventDefault(); if (e.dataTransfer.files.length > 0) processFiles(e.dataTransfer.files); }}
+          onDragOver={e => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; }}
+          onDrop={e => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files.length > 0) processFiles(e.dataTransfer.files); }}
         >
           <textarea
             ref={textareaRef}

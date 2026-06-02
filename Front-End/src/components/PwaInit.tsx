@@ -9,7 +9,7 @@ export function PwaInit() {
     // Falls back silently on browsers that do not support the API or that
     // require fullscreen before allowing an orientation lock (e.g. desktop).
     if (screen.orientation && typeof screen.orientation.lock === 'function') {
-      screen.orientation.lock('natural').catch(() => {});
+      screen.orientation.lock('portrait').catch(() => {});
     }
   }, []);
 
