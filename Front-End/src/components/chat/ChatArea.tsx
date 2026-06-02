@@ -39,6 +39,7 @@ const DateDivider: React.FC<{ date: string }> = ({ date }) => {
 const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const { state, dispatch } = useAppContext();
   const [isDragging, setIsDragging] = useState(false);
+  const dragCounter = useRef(0);
   const [showScrollPill, setShowScrollPill] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const uploadErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -189,8 +190,24 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     uploadErrorTimer.current = setTimeout(() => setUploadError(null), 4000);
   };
 
+  // Reset drag overlay on any drop, even when a child calls stopPropagation.
+  // Capture phase fires before child handlers, so stopPropagation can't suppress it.
+  useEffect(() => {
+    const resetDrag = () => {
+      dragCounter.current = 0;
+      setIsDragging(false);
+    };
+    window.addEventListener('drop', resetDrag, true);
+    window.addEventListener('dragend', resetDrag, true);
+    return () => {
+      window.removeEventListener('drop', resetDrag, true);
+      window.removeEventListener('dragend', resetDrag, true);
+    };
+  }, []);
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
+    dragCounter.current = 0;
     setIsDragging(false);
 
     const fileList = Array.from(e.dataTransfer.files);
@@ -238,8 +255,9 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   return (
     <div
       className="flex-1 flex flex-col bg-background overflow-hidden relative transition-all"
-      onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragging(false); }}
+      onDragEnter={(e) => { e.preventDefault(); dragCounter.current++; setIsDragging(true); }}
+      onDragLeave={() => { dragCounter.current--; if (dragCounter.current <= 0) { dragCounter.current = 0; setIsDragging(false); } }}
+      onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
     >
       {isDragging && (

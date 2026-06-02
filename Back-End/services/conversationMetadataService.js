@@ -221,37 +221,58 @@ async function setUnreadStatus(conversationId, userId, isUnread) {
 }
 
 /**
- * Get all DM conversations the user has interacted with (has a conversation_metadata row),
- * enriched with the latest message preview from the messages table.
- * The existence of a row drives Chats vs Users section — the message preview is cosmetic.
+ * Get all conversations the user has interacted with, enriched with the latest message
+ * preview. Covers both DMs (via conversation_metadata rows) and groups (via group_members).
+ * The lastMessage data is used by the sidebar to sort conversations by recency.
  */
 async function getConversationList(userId) {
   try {
     const [rows] = await pool.query(
-      `SELECT
-         cm.conversation_id,
-         MAX(m.created_at) AS last_message_at,
-         SUBSTRING_INDEX(
-           GROUP_CONCAT(m.content ORDER BY m.created_at DESC SEPARATOR CHAR(1)),
-           CHAR(1), 1
-         ) AS last_content,
-         SUBSTRING_INDEX(
-           GROUP_CONCAT(CAST(m.sender_id AS CHAR) ORDER BY m.created_at DESC SEPARATOR CHAR(1)),
-           CHAR(1), 1
-         ) AS last_sender_id
-       FROM conversation_metadata cm
-       LEFT JOIN messages m
-         ON m.conversation_id = cm.conversation_id AND m.is_deleted = 0
-       WHERE cm.user_id = ? AND cm.conversation_id LIKE 'dm_%'
-       GROUP BY cm.conversation_id, cm.updated_at
-       ORDER BY COALESCE(MAX(m.created_at), cm.updated_at) DESC
+      `(
+         SELECT
+           cm.conversation_id,
+           MAX(m.created_at) AS last_message_at,
+           SUBSTRING_INDEX(
+             GROUP_CONCAT(m.content ORDER BY m.created_at DESC SEPARATOR CHAR(1)),
+             CHAR(1), 1
+           ) AS last_content,
+           SUBSTRING_INDEX(
+             GROUP_CONCAT(CAST(m.sender_id AS CHAR) ORDER BY m.created_at DESC SEPARATOR CHAR(1)),
+             CHAR(1), 1
+           ) AS last_sender_id
+         FROM conversation_metadata cm
+         LEFT JOIN messages m
+           ON m.conversation_id = cm.conversation_id AND m.is_deleted = 0
+         WHERE cm.user_id = ? AND cm.conversation_id LIKE 'dm_%'
+         GROUP BY cm.conversation_id, cm.updated_at
+       )
+       UNION ALL
+       (
+         SELECT
+           gm.group_id AS conversation_id,
+           MAX(m.created_at) AS last_message_at,
+           SUBSTRING_INDEX(
+             GROUP_CONCAT(m.content ORDER BY m.created_at DESC SEPARATOR CHAR(1)),
+             CHAR(1), 1
+           ) AS last_content,
+           SUBSTRING_INDEX(
+             GROUP_CONCAT(CAST(m.sender_id AS CHAR) ORDER BY m.created_at DESC SEPARATOR CHAR(1)),
+             CHAR(1), 1
+           ) AS last_sender_id
+         FROM group_members gm
+         LEFT JOIN messages m
+           ON m.conversation_id = gm.group_id AND m.is_deleted = 0
+         WHERE gm.user_id = ? AND gm.left_at IS NULL
+         GROUP BY gm.group_id
+       )
+       ORDER BY COALESCE(last_message_at, '1970-01-01') DESC
        LIMIT 500`,
-      [userId]
+      [userId, userId]
     );
 
     return rows.map(row => ({
       conversationId: row.conversation_id,
-      type: 'dm',
+      type: row.conversation_id.startsWith('dm_') ? 'dm' : 'group',
       lastMessageAt: row.last_message_at ? row.last_message_at.toISOString() : null,
       lastMessageContent: row.last_content || '',
       lastMessageSenderId: row.last_sender_id ? String(row.last_sender_id) : '',
