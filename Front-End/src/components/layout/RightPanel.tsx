@@ -8,16 +8,28 @@ import { setConversationBlockStatus, emitConversationMetadataChanged, muteConver
 import { useSignedUrl } from '@/hooks/useSignedUrl';
 import { getSignedUrl, downloadFile } from '@/services/fileUrl';
 import { Avatar } from '../ui/avatar';
-import { 
+import {
   X, Mail, Building, Calendar, FileIcon,
   UserPlus, Crown, ChevronRight, Download, MoreVertical,
   Trash2, ShieldCheck, ShieldAlert, LogOut, Edit, Bell,
   BellOff, ExternalLink, Image as ImageIcon, Camera,
   Search, Grid, List, ArrowLeft, ArrowRight,
-  MessageSquare, FileText, FileSpreadsheet,
-  File as GenericFile, Settings, Save, Shield,
+  MessageSquare, Settings, Save, Shield,
   Radio, VolumeX, CheckCircle2, ChevronDown, UserCircle
 } from 'lucide-react';
+
+function getFileIconPath(filename: string): string {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  if (ext === 'pdf') return '/icons/pdf.png';
+  if (ext === 'csv') return '/icons/csv.png';
+  if (['exe', 'msi', 'bat', 'cmd'].includes(ext)) return '/icons/exe.png';
+  if (['ppt', 'pptx'].includes(ext)) return '/icons/ppt.png';
+  if (['doc', 'docx', 'odt', 'rtf'].includes(ext)) return '/icons/word.png';
+  if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'zst'].includes(ext)) return '/icons/zip.png';
+  if (['mp4','webm','mov','avi','mkv','mpeg','mpg','3gp','ogv','m4v','wmv','flv',
+       'mp3','wav','ogg','m4a','aac','flac','wma','opus'].includes(ext)) return '/icons/media.png';
+  return '/icons/file.png';
+}
 import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
 import { Button } from '@/components/ui/button';
@@ -902,9 +914,7 @@ const RightPanel: React.FC = () => {
                   <div key={file.id} className="p-2 hover:bg-muted/50 rounded-xl group transition-all flex flex-col gap-2">
                     <div className="flex items-center gap-3">
                       <div className="p-2 bg-muted rounded-lg shrink-0">
-                        {file.fileType === 'pdf' ? <FileText className="h-4 w-4 text-red-500" /> : 
-                         file.fileType === 'xlsx' ? <FileSpreadsheet className="h-4 w-4 text-green-600" /> :
-                         <GenericFile className="h-4 w-4 text-blue-500" />}
+                        <img src={getFileIconPath(file.fileName)} alt="" className="h-5 w-5 object-contain" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-bold truncate">{file.fileName}</p>

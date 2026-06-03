@@ -11,6 +11,19 @@ import { downloadFile } from '@/services/fileUrl';
 import { toast } from '@/hooks/use-toast';
 import FileCard from '../ui/FileCard';
 
+function getFileIconPath(filename: string): string {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  if (ext === 'pdf') return '/icons/pdf.png';
+  if (ext === 'csv') return '/icons/csv.png';
+  if (['exe', 'msi', 'bat', 'cmd'].includes(ext)) return '/icons/exe.png';
+  if (['ppt', 'pptx'].includes(ext)) return '/icons/ppt.png';
+  if (['doc', 'docx', 'odt', 'rtf'].includes(ext)) return '/icons/word.png';
+  if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'zst'].includes(ext)) return '/icons/zip.png';
+  if (['mp4','webm','mov','avi','mkv','mpeg','mpg','3gp','ogv','m4v','wmv','flv',
+       'mp3','wav','ogg','m4a','aac','flac','wma','opus'].includes(ext)) return '/icons/media.png';
+  return '/icons/file.png';
+}
+
 interface FileRendererProps {
   files: MessageFile[];
   messageId: string;
@@ -171,9 +184,9 @@ const GridThumb: React.FC<{ file: MessageFile; idx: number; remainingCount: numb
           </div>
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-1">
-          <FileIcon className="h-10 w-10 text-muted-foreground/60" />
-          <span className="text-[10px] font-bold text-muted-foreground uppercase px-2 text-center truncate w-full">{file.name}</span>
+        <div className="flex flex-col items-center gap-1 px-2">
+          <img src={getFileIconPath(file.name)} alt="" className="h-10 w-10 object-contain" />
+          <span className="text-[10px] font-bold text-muted-foreground uppercase text-center truncate w-full">{file.name}</span>
         </div>
       )}
 

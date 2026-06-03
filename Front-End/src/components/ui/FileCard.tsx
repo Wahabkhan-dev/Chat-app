@@ -2,13 +2,26 @@
 "use client";
 
 import React, { useState } from 'react';
-import { FileIcon, FileText, FileSpreadsheet, FileImage, Download, FilePieChart, Eye, Loader2, Search, Archive, Video, Music } from 'lucide-react';
+import { Download, Eye, Loader2 } from 'lucide-react';
 import { FileType } from '@/mock/messages';
 import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { useAppContext } from '@/context/AppContext';
 import { downloadFile } from '@/services/fileUrl';
+
+function getFileIconPath(filename: string): string {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  if (ext === 'pdf') return '/icons/pdf.png';
+  if (ext === 'csv') return '/icons/csv.png';
+  if (['exe', 'msi', 'bat', 'cmd'].includes(ext)) return '/icons/exe.png';
+  if (['ppt', 'pptx'].includes(ext)) return '/icons/ppt.png';
+  if (['doc', 'docx', 'odt', 'rtf'].includes(ext)) return '/icons/word.png';
+  if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'zst'].includes(ext)) return '/icons/zip.png';
+  if (['mp4','webm','mov','avi','mkv','mpeg','mpg','3gp','ogv','m4v','wmv','flv',
+       'mp3','wav','ogg','m4a','aac','flac','wma','opus'].includes(ext)) return '/icons/media.png';
+  return '/icons/file.png';
+}
 
 interface FileCardProps {
   name: string;
@@ -26,30 +39,16 @@ const FileCard: React.FC<FileCardProps> = ({ name, type, size, previewUrl, fileK
   const [isDownloading, setIsDownloading] = useState(false);
   const { dispatch } = useAppContext();
 
-  const getIcon = () => {
-    switch (type) {
-      case 'pdf': return <FileText className="h-8 w-8 text-red-500" />;
-      case 'xlsx': return <FileSpreadsheet className="h-8 w-8 text-green-600" />;
-      case 'docx': return <FileText className="h-8 w-8 text-blue-600" />;
-      case 'pptx': return <FilePieChart className="h-8 w-8 text-orange-500" />;
-      case 'image': return <FileImage className="h-8 w-8 text-cyan-500" />;
-      case 'archive': return <Archive className="h-8 w-8 text-purple-500" />;
-      case 'video': return <Video className="h-8 w-8 text-foreground" />;
-      case 'audio': return <Music className="h-8 w-8 text-cyan-500" />;
-      default: return <FileIcon className="h-8 w-8 text-gray-400" />;
-    }
-  };
+  const getIcon = () => (
+    <img src={getFileIconPath(name)} alt="" className="h-8 w-8 object-contain" />
+  );
 
   const getThemeColor = () => {
     switch (type) {
-      case 'pdf': return 'border-red-500/20 bg-red-500/5';
-      case 'xlsx': return 'border-green-500/20 bg-green-500/5';
-      case 'docx': return 'border-blue-500/20 bg-blue-500/5';
-      case 'pptx': return 'border-orange-500/20 bg-orange-500/5';
       case 'archive': return 'border-purple-500/20 bg-purple-500/5';
-      case 'image': return 'border-cyan-500/20 bg-cyan-500/5';
-      case 'audio': return 'border-cyan-500/20 bg-cyan-500/5';
-      default: return 'border-border bg-muted/5';
+      case 'image':   return 'border-cyan-500/20 bg-cyan-500/5';
+      case 'audio':   return 'border-cyan-500/20 bg-cyan-500/5';
+      default:        return 'border-border bg-muted/5';
     }
   };
 

@@ -6,9 +6,8 @@ import { useAppContext } from '@/context/AppContext';
 import { MessageFile } from '@/mock/messages';
 import { Button } from '@/components/ui/button';
 import {
-  FileText, FileSpreadsheet, FilePieChart, Download, X, ZoomIn,
-  File as FileIcon, Video, Archive, AlertCircle, Plus, Minus,
-  ChevronLeft, ChevronRight, Loader2, Music,
+  Download, X, ZoomIn, AlertCircle, Plus, Minus,
+  ChevronLeft, ChevronRight, Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSignedUrl } from '@/hooks/useSignedUrl';
@@ -17,6 +16,19 @@ import { downloadFile } from '@/services/fileUrl';
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.25;
+
+function getFileIcon(filename: string): string {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  if (ext === 'pdf') return '/icons/pdf.png';
+  if (ext === 'csv') return '/icons/csv.png';
+  if (['exe', 'msi', 'bat', 'cmd'].includes(ext)) return '/icons/exe.png';
+  if (['ppt', 'pptx'].includes(ext)) return '/icons/ppt.png';
+  if (['doc', 'docx', 'odt', 'rtf'].includes(ext)) return '/icons/word.png';
+  if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'zst'].includes(ext)) return '/icons/zip.png';
+  if (['mp4','webm','mov','avi','mkv','mpeg','mpg','3gp','ogv','m4v','wmv','flv',
+       'mp3','wav','ogg','m4a','aac','flac','wma','opus'].includes(ext)) return '/icons/media.png';
+  return '/icons/file.png';
+}
 
 // ─── Inner component: resolves the signed URL and renders the file ────────────
 interface GalleryItemViewProps {
@@ -44,6 +56,7 @@ const GalleryItemView: React.FC<GalleryItemViewProps> = ({
 }) => {
   const { url: signedUrl, loading } = useSignedUrl(file.key || undefined);
   const displayUrl = signedUrl || file.url || '';
+  const fileIcon = getFileIcon(file.name);
 
   if (loading && !file.url) {
     return (
@@ -55,14 +68,13 @@ const GalleryItemView: React.FC<GalleryItemViewProps> = ({
 
   if (!displayUrl) {
     return (
-      <div className="flex flex-col items-center justify-center h-full py-20 text-center px-6">
-        <div className="w-24 h-24 rounded-full bg-muted flex items-center justify-center mb-6">
-          <AlertCircle className="h-10 w-10 text-muted-foreground opacity-30" />
+      <div className="flex flex-col items-center justify-center h-full gap-5 text-center px-8">
+        <img src={fileIcon} alt="" className="w-28 h-28 object-contain drop-shadow-lg" />
+        <div>
+          <h3 className="text-lg font-bold break-all max-w-sm">{file.name}</h3>
+          {file.size && <p className="text-sm text-muted-foreground mt-1">{file.size}</p>}
+          <p className="text-xs text-muted-foreground/60 mt-2">Cannot be previewed — please download to view</p>
         </div>
-        <h3 className="text-xl font-bold">Preview not available</h3>
-        <p className="text-sm text-muted-foreground mt-2 max-w-xs mx-auto">
-          This file cannot be previewed. Please download to view it.
-        </p>
       </div>
     );
   }
@@ -129,15 +141,13 @@ const GalleryItemView: React.FC<GalleryItemViewProps> = ({
       );
     default:
       return (
-        <div className="flex flex-col items-center justify-center h-full py-20 text-center px-6">
-          <div className="w-24 h-24 rounded-full bg-muted flex items-center justify-center mb-6">
-            <AlertCircle className="h-10 w-10 text-muted-foreground opacity-30" />
+        <div className="flex flex-col items-center justify-center h-full gap-5 text-center px-8">
+          <img src={fileIcon} alt="" className="w-28 h-28 object-contain drop-shadow-lg" />
+          <div>
+            <h3 className="text-lg font-bold break-all max-w-sm">{file.name}</h3>
+            {file.size && <p className="text-sm text-muted-foreground mt-1">{file.size}</p>}
+            <p className="text-xs text-muted-foreground/60 mt-2">No preview available — download to open</p>
           </div>
-          <h3 className="text-xl font-bold">Preview not available</h3>
-          <p className="text-sm text-muted-foreground mt-2 max-w-xs mx-auto">
-            This file type ({file.type?.toUpperCase()}) cannot be previewed directly.
-            Please download the file to view it.
-          </p>
         </div>
       );
   }
@@ -147,6 +157,7 @@ const GalleryItemView: React.FC<GalleryItemViewProps> = ({
 const GalleryThumb: React.FC<{ file: MessageFile; active: boolean; onClick: () => void }> = ({ file, active, onClick }) => {
   const { url: signedUrl } = useSignedUrl(file.key || undefined);
   const src = signedUrl || file.url || '';
+  const icon = getFileIcon(file.name);
   return (
     <button
       onClick={onClick}
@@ -159,7 +170,7 @@ const GalleryThumb: React.FC<{ file: MessageFile; active: boolean; onClick: () =
         <img src={src} className="w-full h-full object-cover" alt="" />
       ) : (
         <div className="w-full h-full bg-muted flex items-center justify-center">
-          <FileIcon className="h-4 w-4 text-muted-foreground" />
+          <img src={icon} alt="" className="w-7 h-7 object-contain" />
         </div>
       )}
     </button>
@@ -322,16 +333,8 @@ const FilePreviewModal: React.FC = () => {
   if (!open || !currentFile) return null;
 
   const getIcon = () => {
-    switch (currentFile.type) {
-      case 'pdf':    return <FileText      className="h-4 w-4 text-red-500" />;
-      case 'xlsx':   return <FileSpreadsheet className="h-4 w-4 text-green-600" />;
-      case 'pptx':   return <FilePieChart  className="h-4 w-4 text-orange-500" />;
-      case 'audio':  return <Music         className="h-4 w-4 text-cyan-500" />;
-      case 'video':  return <Video         className="h-4 w-4 text-primary" />;
-      case 'archive':return <Archive       className="h-4 w-4 text-purple-500" />;
-      case 'image':  return <ZoomIn        className="h-4 w-4 text-cyan-500" />;
-      default:       return <FileIcon      className="h-4 w-4 text-muted-foreground" />;
-    }
+    if (currentFile.type === 'image') return <ZoomIn className="h-4 w-4 text-cyan-500" />;
+    return <img src={getFileIcon(currentFile.name)} alt="" className="h-4 w-4 object-contain" />;
   };
 
   return (

@@ -224,22 +224,36 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     };
   }, []);
 
+  const MAX_FILES = 10;
+  const MAX_FILE_SIZE_MB = 100;
+  const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     dragCounter.current = 0;
     setIsDragging(false);
 
-    const fileList = Array.from(e.dataTransfer.files);
+    let fileList = Array.from(e.dataTransfer.files);
     if (fileList.length === 0) return;
 
-    if (state.chatUI.uploadedFiles.length + fileList.length > 10) {
-      showUploadError('You can attach a maximum of 10 files per message.');
-      return;
+    // Drop oversized files and notify
+    const oversized = fileList.filter(f => f.size > MAX_FILE_SIZE);
+    fileList = fileList.filter(f => f.size <= MAX_FILE_SIZE);
+    if (oversized.length > 0) {
+      const names = oversized.map(f => `"${f.name}"`).join(', ');
+      const msg = oversized.length === 1
+        ? `${names} exceeds the ${MAX_FILE_SIZE_MB} MB limit and was removed.`
+        : `${oversized.length} files exceed the ${MAX_FILE_SIZE_MB} MB limit and were removed: ${names}`;
+      showUploadError(msg);
+      dispatch({ type: 'ADD_TOAST', payload: { message: msg, type: 'error' } });
     }
+    if (fileList.length === 0) return;
 
-    const largeFile = fileList.find(f => f.size > 50 * 1024 * 1024);
-    if (largeFile) {
-      showUploadError(`"${largeFile.name}" exceeds the 50 MB file size limit.`);
+    // Enforce max file count — reject ALL if total would exceed limit
+    if (state.chatUI.uploadedFiles.length + fileList.length > MAX_FILES) {
+      const msg = `You can only send up to ${MAX_FILES} files at a time.`;
+      showUploadError(msg);
+      dispatch({ type: 'ADD_TOAST', payload: { message: msg, type: 'error' } });
       return;
     }
 
@@ -249,7 +263,9 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         file,
         previewUrl: URL.createObjectURL(file),
         name: file.name,
-        size: `${(file.size / 1024).toFixed(1)} KB`,
+        size: file.size >= 1024 * 1024
+          ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+          : `${(file.size / 1024).toFixed(1)} KB`,
         type: getFileCategory(ext),
         mimeType: file.type,
       };

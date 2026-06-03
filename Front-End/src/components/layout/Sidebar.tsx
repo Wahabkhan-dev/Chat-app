@@ -346,13 +346,16 @@ const Sidebar: React.FC<{
     return diff !== 0 ? diff : a.localeCompare(b);
   };
 
-  // Favourites section: any DM (with or without history) whose convId is pinned
-  const favouriteItems = useMemo(() =>
-    otherActiveUsers
+  // Favourites section: any pinned DM or pinned group
+  const favouriteItems = useMemo(() => {
+    const favDms = otherActiveUsers
       .filter(u => isFavourite(getDmConvId(currentUserId, u.id)))
-      .map(u => ({ kind: 'dm' as const, convId: getDmConvId(currentUserId, u.id), user: u }))
-      .sort((a, b) => byRecency(a.convId, b.convId)),
-    [otherActiveUsers, state.conversationMeta, currentUserId]);
+      .map(u => ({ kind: 'dm' as const, convId: getDmConvId(currentUserId, u.id), user: u }));
+    const favGroups = state.groups
+      .filter(g => isFavourite(g.id) && (g.members.includes(currentUserId) || !!state.conversationMeta[g.id]?.leftAt))
+      .map(g => ({ kind: 'group' as const, convId: g.id, group: g }));
+    return [...favDms, ...favGroups].sort((a, b) => byRecency(a.convId, b.convId));
+  }, [otherActiveUsers, state.groups, state.conversationMeta, currentUserId]);
 
   // Chats section: DMs where user has interacted (chatTracked) OR has a lastMessage, NOT pinned
   const chatItems = useMemo(() =>
@@ -407,7 +410,7 @@ const Sidebar: React.FC<{
       })
       .map(u => ({ kind: 'dm' as const, convId: getDmConvId(currentUserId, u.id), user: u }));
     const activeGroupItems = state.groups
-      .filter(g => (g.members.includes(currentUserId) || !!state.conversationMeta[g.id]?.leftAt) && !state.conversationMeta[g.id]?.leftAt)
+      .filter(g => (g.members.includes(currentUserId) || !!state.conversationMeta[g.id]?.leftAt) && !state.conversationMeta[g.id]?.leftAt && !state.conversationMeta[g.id]?.pinned)
       .map(g => ({ kind: 'group' as const, convId: g.id, group: g }));
     const leftGroupItems = state.groups
       .filter(g => !!state.conversationMeta[g.id]?.leftAt)
@@ -761,7 +764,7 @@ const Sidebar: React.FC<{
                 {favouriteItems.length === 0 ? (
                   <p className="text-[11px] text-muted-foreground/40 text-center py-3 italic px-2">No favourites yet — right-click any chat to add one</p>
                 ) : (
-                  favouriteItems.map(item => renderDmItem(item))
+                  favouriteItems.map(item => item.kind === 'dm' ? renderDmItem(item) : renderGroupItem(item))
                 )}
               </div>
             )}

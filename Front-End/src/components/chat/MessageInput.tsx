@@ -16,6 +16,23 @@ import { toast } from '@/hooks/use-toast';
 
 const COMMON_EMOJIS = ['😀', '😂', '😊', '😍', '👍', '🙌', '🔥', '✨', '🚀', '💡', '✅', '❌', '👋', '🎉', '🙏', '💯'];
 
+const MAX_FILES = 10;
+const MAX_FILE_SIZE_MB = 100;
+const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
+
+function getFileIcon(filename: string): string {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  if (ext === 'pdf') return '/icons/pdf.png';
+  if (ext === 'csv') return '/icons/csv.png';
+  if (['exe', 'msi', 'bat', 'cmd'].includes(ext)) return '/icons/exe.png';
+  if (['ppt', 'pptx'].includes(ext)) return '/icons/ppt.png';
+  if (['doc', 'docx', 'odt', 'rtf'].includes(ext)) return '/icons/word.png';
+  if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'zst'].includes(ext)) return '/icons/zip.png';
+  if (['mp4','webm','mov','avi','mkv','mpeg','mpg','3gp','ogv','m4v','wmv','flv',
+       'mp3','wav','ogg','m4a','aac','flac','wma','opus'].includes(ext)) return '/icons/media.png';
+  return '/icons/file.png';
+}
+
 const IMAGE_EXTS = new Set(['png','jpg','jpeg','webp','gif','svg','bmp','tiff','tif','ico','heic','heif','avif']);
 const VIDEO_EXTS = new Set(['mp4','webm','mov','avi','mkv','mpeg','mpg','3gp','ogv','m4v','wmv','flv']);
 const AUDIO_EXTS = new Set(['mp3','wav','ogg','m4a','aac','flac','wma','opus']);
@@ -96,27 +113,39 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
     const fileList = Array.from(files);
     if (fileList.length === 0) return;
 
-    if (uploadedFiles.length + fileList.length > 10) {
-      dispatch({ type: 'ADD_TOAST', payload: { message: 'Max 10 files per message', type: 'error' } });
-      return;
-    }
+    // 1. Drop files that individually exceed the size limit and notify
+    const oversized = fileList.filter(f => f.size > MAX_FILE_SIZE);
+    let valid = fileList.filter(f => f.size <= MAX_FILE_SIZE);
 
-    const largeFile = fileList.find(f => f.size > 50 * 1024 * 1024);
-    if (largeFile) {
-      const msg = `"${largeFile.name}" exceeds the 50 MB file size limit.`;
+    if (oversized.length > 0) {
+      const names = oversized.map(f => `"${f.name}"`).join(', ');
+      const msg = oversized.length === 1
+        ? `${names} exceeds the ${MAX_FILE_SIZE_MB} MB limit and was removed.`
+        : `${oversized.length} files exceed the ${MAX_FILE_SIZE_MB} MB limit and were removed: ${names}`;
       if (onFileError) onFileError(msg);
-      else dispatch({ type: 'ADD_TOAST', payload: { message: 'Max file size 50MB', type: 'error' } });
+      dispatch({ type: 'ADD_TOAST', payload: { message: msg, type: 'error' } });
+    }
+
+    if (valid.length === 0) return;
+
+    // 2. Enforce max file count — reject ALL new files if total would exceed limit
+    if (uploadedFiles.length + valid.length > MAX_FILES) {
+      const msg = `You can only send up to ${MAX_FILES} files at a time.`;
+      if (onFileError) onFileError(msg);
+      dispatch({ type: 'ADD_TOAST', payload: { message: msg, type: 'error' } });
       return;
     }
 
-    const newFiles = fileList.map(file => {
+    const newFiles = valid.map(file => {
       const ext = file.name.split('.').pop() || '';
       const category = getFileCategory(ext);
       return {
         file,
         previewUrl: URL.createObjectURL(file),
         name: file.name,
-        size: `${(file.size / 1024).toFixed(1)} KB`,
+        size: file.size >= 1024 * 1024
+          ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+          : `${(file.size / 1024).toFixed(1)} KB`,
         type: category,
         mimeType: file.type,
       };
@@ -378,9 +407,9 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
                     </div>
                   </div>
                 ) : (
-                  <div className="flex flex-col items-center gap-1">
-                    <FileIcon className="h-6 w-6 text-muted-foreground" />
-                    <span className="text-[8px] font-bold uppercase truncate px-1 w-full text-center">{file.name}</span>
+                  <div className="flex flex-col items-center justify-center gap-1 p-1 w-full h-full">
+                    <img src={getFileIcon(file.name)} alt="" className="h-9 w-9 object-contain" />
+                    <span className="text-[8px] font-bold truncate px-1 w-full text-center leading-tight">{file.name}</span>
                   </div>
                 )}
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
@@ -389,7 +418,7 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
                 </div>
               </div>
             ))}
-            {uploadedFiles.length < 10 && (
+            {uploadedFiles.length < MAX_FILES && (
               <button 
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
