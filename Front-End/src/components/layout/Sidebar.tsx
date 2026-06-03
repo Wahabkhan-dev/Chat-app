@@ -7,7 +7,7 @@ import {
   Search, Plus, Settings, Shield, LogOut, FileText,
   MessageSquare, Trash2, Ban,
   CheckCheck, Search as SearchIcon, VolumeX, Volume2, Lock, Camera, X,
-  Star, ChevronDown, Users
+  Star, ChevronDown, Users, BookMarked,
 } from 'lucide-react';
 import { Avatar } from '../ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -281,7 +281,7 @@ const Sidebar: React.FC<{
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; id: string; name: string; type: 'dm' | 'group'; hasHistory: boolean } | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [activeTab, setActiveTab] = useState<'chats' | 'groups'>('chats');
-  const [openSections, setOpenSections] = useState({ favourites: true, chats: true, users: true });
+  const [openSections, setOpenSections] = useState({ favourites: true, chats: true, users: true, groups: true });
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const mobileSearchRef = useRef<HTMLInputElement>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -338,7 +338,12 @@ const Sidebar: React.FC<{
   const byRecency = (a: string, b: string) => {
     const aT = state.conversationMeta[a]?.lastMessage?.timestamp;
     const bT = state.conversationMeta[b]?.lastMessage?.timestamp;
-    return (bT ? new Date(bT).getTime() : 0) - (aT ? new Date(aT).getTime() : 0);
+    // Date.parse is more robust than new Date().getTime() — handles MySQL "YYYY-MM-DD HH:MM:SS"
+    // format that returns NaN in Firefox/Safari with the Date constructor.
+    const aMs = aT ? (Date.parse(aT) || 0) : 0;
+    const bMs = bT ? (Date.parse(bT) || 0) : 0;
+    const diff = bMs - aMs;
+    return diff !== 0 ? diff : a.localeCompare(b);
   };
 
   // Favourites section: any DM (with or without history) whose convId is pinned
@@ -383,6 +388,36 @@ const Sidebar: React.FC<{
       })
       .sort((a, b) => a.name.localeCompare(b.name)),
     [otherActiveUsers, state.conversationMeta, currentUserId]);
+
+  // Combined Chats: DMs with history + active groups, sorted by recency.
+  // Left groups are appended at the bottom so they don't disrupt the recency order.
+  // Flat single-dep useMemo — avoids stale closures from the chatItems/sortedGroups chain.
+  const combinedChats = useMemo(() => {
+    const getMs = (convId: string): number => {
+      const ts = state.conversationMeta[convId]?.lastMessage?.timestamp;
+      if (!ts) return 0;
+      const ms = Date.parse(ts);
+      return isNaN(ms) ? 0 : ms;
+    };
+    const dmItems = otherActiveUsers
+      .filter(u => {
+        const convId = getDmConvId(currentUserId, u.id);
+        const meta = state.conversationMeta[convId];
+        return (meta?.chatTracked || !!meta?.lastMessage) && !meta?.pinned;
+      })
+      .map(u => ({ kind: 'dm' as const, convId: getDmConvId(currentUserId, u.id), user: u }));
+    const activeGroupItems = state.groups
+      .filter(g => (g.members.includes(currentUserId) || !!state.conversationMeta[g.id]?.leftAt) && !state.conversationMeta[g.id]?.leftAt)
+      .map(g => ({ kind: 'group' as const, convId: g.id, group: g }));
+    const leftGroupItems = state.groups
+      .filter(g => !!state.conversationMeta[g.id]?.leftAt)
+      .map(g => ({ kind: 'group' as const, convId: g.id, group: g }));
+    const sorted = [...dmItems, ...activeGroupItems].sort((a, b) => {
+      const diff = getMs(b.convId) - getMs(a.convId);
+      return diff !== 0 ? diff : a.convId.localeCompare(b.convId);
+    });
+    return [...sorted, ...leftGroupItems];
+  }, [otherActiveUsers, state.groups, state.conversationMeta, currentUserId]);
 
   // Mobile search results (People + Groups)
   const mobileSearchResults = useMemo(() => {
@@ -431,7 +466,64 @@ const Sidebar: React.FC<{
     if (Math.abs(e.clientX - longPressPos.current.x) > 8 || Math.abs(e.clientY - longPressPos.current.y) > 8) cancelLongPress();
   };
 
+  // Self-DM ("You" chat) — same user on both sides of the conv ID
+  const selfConvId = getDmConvId(currentUserId, currentUserId);
+
   // --- Item renderers ---
+
+  const renderYouItem = () => {
+    const meta = state.conversationMeta[selfConvId] || { pinned: false, muted: false, unreadCount: 0 };
+    const isActive = state.activeConversation?.id === selfConvId;
+    return (
+      <button
+        onClick={() => {
+          dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: {
+            type: 'dm',
+            id: selfConvId,
+            name: 'You',
+            avatar: state.currentUser?.avatar || null,
+          }});
+          getSocket()?.emit('join_dm', { otherUserId: currentUserId });
+          onConversationSelect?.();
+        }}
+        className={cn(
+          'w-full flex items-center gap-3 p-2.5 rounded-xl transition-all group border relative',
+          isActive
+            ? 'bg-primary/5 text-primary border-primary/20'
+            : 'hover:bg-muted text-muted-foreground border-transparent hover:border-border/40'
+        )}
+      >
+        <div className="relative shrink-0">
+          <Avatar name={state.currentUser?.name || 'You'} src={state.currentUser?.avatar} size="md" showStatus={false} />
+          <div className="absolute -bottom-1 -right-1 bg-primary rounded-full p-1 shadow border-2 border-card">
+            <BookMarked className="h-2 w-2 text-white" />
+          </div>
+        </div>
+        <div className="flex-1 text-left min-w-0">
+          <div className="flex items-center gap-1.5">
+            <p className={cn('text-sm font-bold truncate group-hover:text-primary transition-colors', isActive ? 'text-primary' : 'text-foreground')}>
+              You
+            </p>
+            <span className="shrink-0 text-[8px] font-black uppercase tracking-widest bg-primary/10 text-primary px-1.5 py-0.5 rounded-full border border-primary/20">
+              YOU
+            </span>
+          </div>
+          {meta.lastMessage ? (
+            <p className={cn('text-[11px] truncate', meta.unreadCount > 0 ? 'text-foreground font-semibold' : 'text-muted-foreground')}>
+              {meta.lastMessage.content || '📎 Attachment'}
+            </p>
+          ) : (
+            <p className="text-[10px] text-muted-foreground/70 truncate font-semibold">Personal notes & saved items</p>
+          )}
+        </div>
+        {meta.unreadCount > 0 && (
+          <Badge className="h-5 px-1.5 bg-primary text-white font-bold rounded-lg shrink-0">
+            {meta.unreadCount}
+          </Badge>
+        )}
+      </button>
+    );
+  };
 
   const renderDmItem = (item: { kind: 'dm'; convId: string; user: any }) => {
     const { convId, user } = item;
@@ -650,6 +742,12 @@ const Sidebar: React.FC<{
 
         {activeTab === 'chats' ? (
           <>
+            {/* 📓 You — personal notepad, always pinned at the very top */}
+            <div className="pt-2 pb-1">
+              {renderYouItem()}
+            </div>
+            <div className="h-px bg-border/40 mx-1 mb-1" />
+
             {/* ⭐ Favourites */}
             <SectionHeader
               icon={<Star className="h-3.5 w-3.5" />}
@@ -668,22 +766,24 @@ const Sidebar: React.FC<{
               </div>
             )}
 
-            {/* 💬 Chats */}
+            {/* 💬 Chats (DMs + Groups) */}
             <SectionHeader
               icon={<MessageSquare className="h-3.5 w-3.5" />}
               label="Chats"
-              count={chatItems.length}
+              count={combinedChats.length}
               open={openSections.chats}
               onToggle={() => setOpenSections(s => ({ ...s, chats: !s.chats }))}
             />
             {openSections.chats && (
               <div className="space-y-0.5">
-                {chatItems.length === 0 ? (
+                {combinedChats.length === 0 ? (
                   <p className="text-[11px] text-muted-foreground/40 text-center py-3 italic px-2">
-                    No direct messages yet
+                    No conversations yet
                   </p>
                 ) : (
-                  chatItems.map(item => renderDmItem(item))
+                  combinedChats.map(item =>
+                    item.kind === 'dm' ? renderDmItem(item) : renderGroupItem(item)
+                  )
                 )}
               </div>
             )}
@@ -774,8 +874,22 @@ const Sidebar: React.FC<{
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={async () => {
-                    try { await logoutUser(); } catch (e) { console.error('Logout failed:', e); } finally { dispatch({ type: 'LOGOUT' }); }
+                  onClick={() => {
+                    dispatch({
+                      type: 'OPEN_MODAL',
+                      payload: {
+                        type: 'confirm',
+                        data: {
+                          title: 'Sign Out',
+                          body: 'Are you sure you want to sign out? You will need to sign back in to access your messages.',
+                          confirmLabel: 'Sign Out',
+                          confirmStyle: 'danger',
+                          onConfirm: async () => {
+                            try { await logoutUser(); } catch (e) { console.error('Logout failed:', e); } finally { dispatch({ type: 'LOGOUT' }); }
+                          },
+                        },
+                      },
+                    });
                   }}
                   className="p-2 hover:bg-destructive/10 hover:text-destructive rounded-lg text-muted-foreground transition-all"
                 >

@@ -1009,21 +1009,29 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
       };
     case 'LOAD_CONVERSATION_LIST': {
       const convListMeta = { ...state.conversationMeta };
+      // MySQL returns "YYYY-MM-DD HH:MM:SS" which is not ISO 8601 — Date.parse() on that
+      // format returns NaN in Firefox/Safari. Normalise the space separator to "T" first.
+      const toMs = (ts: string | null | undefined): number => {
+        if (!ts) return 0;
+        const parsed = Date.parse(ts.includes('T') ? ts : ts.replace(' ', 'T'));
+        return isNaN(parsed) ? 0 : parsed;
+      };
       action.payload.forEach(conv => {
         const existing = convListMeta[conv.conversationId];
         const base = existing || { muted: false, muteUntil: null, mutedAt: null, pinned: false, pinnedAt: null, blocked: false, blockedAt: null, hidden: false, unreadCount: 0, hasUnreadMention: false };
-        const incomingTs = conv.lastMessageAt ? new Date(conv.lastMessageAt).getTime() : 0;
-        const existingTs = existing?.lastMessage?.timestamp
-          ? new Date(existing.lastMessage.timestamp).getTime()
-          : 0;
+        const incomingTs = toMs(conv.lastMessageAt);
+        const existingTs = toMs(existing?.lastMessage?.timestamp);
+        const isoTimestamp = conv.lastMessageAt
+          ? (conv.lastMessageAt.includes('T') ? conv.lastMessageAt : conv.lastMessageAt.replace(' ', 'T'))
+          : null;
         convListMeta[conv.conversationId] = {
           ...base,
           chatTracked: true,
-          ...(incomingTs >= existingTs && conv.lastMessageAt ? {
+          ...(incomingTs >= existingTs && isoTimestamp ? {
             lastMessage: {
               content: (conv.lastMessageContent || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1'),
               senderId: conv.lastMessageSenderId || '',
-              timestamp: conv.lastMessageAt,
+              timestamp: isoTimestamp,
             },
           } : {}),
         };
@@ -1033,9 +1041,15 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
     case 'HYDRATE_CONVERSATION_META': {
       const hydratedMeta: Record<string, ConversationMeta> = { ...state.conversationMeta };
       Object.entries(action.payload).forEach(([conversationId, meta]) => {
+        const existingCount = state.conversationMeta[conversationId]?.unreadCount || 0;
         hydratedMeta[conversationId] = {
           ...(state.conversationMeta[conversationId] || { muted: false, muteUntil: null, mutedAt: null, pinned: false, pinnedAt: null, blocked: false, blockedAt: null, hidden: false, unreadCount: 0, hasUnreadMention: false }),
           ...meta,
+          // Server returns unreadCount=0 for normal conversations (only 1 for manually-marked-unread).
+          // Preserve the local count if it's higher — it reflects real-time messages received
+          // during the previous session that haven't been read yet.
+          // syncMissedMessages will verify and correct this count against the backend.
+          unreadCount: Math.max((meta as any).unreadCount ?? 0, existingCount),
         };
       });
       return { ...state, conversationMeta: hydratedMeta };
@@ -1047,14 +1061,20 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
       Object.entries(counts).forEach(([convId, count]) => {
         // Skip the currently open conversation — user is viewing it right now
         if (convId === activeConvId) return;
+        const serverCount = Number(count);
+        const existing = newMeta[convId] || { muted: false, pinned: false, unreadCount: 0, hasUnreadMention: false };
         const preview = previews?.[convId];
+        // Never decrease the in-memory count below the server count: real-time SEND_MESSAGE
+        // increments may have advanced the count beyond what the server returned (the server
+        // only counts messages up to the moment the /unread-since query ran).
+        const resolvedCount = Math.max(serverCount, existing.unreadCount || 0, existing.isManuallyUnread ? 1 : 0);
         newMeta[convId] = {
-          ...(newMeta[convId] || { muted: false, pinned: false, unreadCount: 0, hasUnreadMention: false }),
-          // If the user manually marked this unread, keep at least 1 even when no new messages
-          unreadCount: Math.max(Number(count), newMeta[convId]?.isManuallyUnread ? 1 : 0),
-          hasUnreadMention: Number(count) > 0 ? (newMeta[convId]?.hasUnreadMention ?? false) : false,
-          // Update sidebar preview with the latest message sent while offline
-          ...(preview && Number(count) > 0 ? {
+          ...existing,
+          unreadCount: resolvedCount,
+          hasUnreadMention: resolvedCount > 0 ? (existing.hasUnreadMention ?? false) : false,
+          // Update sidebar preview with the latest message — always, not only when unread,
+          // so that fully-read conversations also get their sort timestamp refreshed.
+          ...(preview ? {
             lastMessage: {
               content: preview.content.replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1'),
               senderId: preview.senderId,
@@ -1136,16 +1156,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     } catch { /* parse error — ignore */ }
   }, [state.currentUser?.id]);
 
-  // Persist conversation meta to localStorage — only device-specific fields.
-  // pinned/pinnedAt and lastMessage are intentionally excluded: they are server-canonical
-  // and must not be restored from a stale local cache on another device.
+  // Persist conversation meta to localStorage.
+  // lastMessage is included so the sidebar sort order is correct immediately on refresh
+  // (server will overwrite it via LOAD_CONVERSATION_LIST shortly after login).
+  // pinned/pinnedAt, muted/muteUntil/mutedAt, and isManuallyUnread are server-canonical
+  // and fetched fresh via HYDRATE_CONVERSATION_META — they are excluded here so a stale
+  // local cache on another device never overrides the server truth.
   useEffect(() => {
     if (!state.currentUser?.id) return;
     try {
       const metaToSave = Object.fromEntries(
         Object.entries(state.conversationMeta).map(([id, meta]) => {
-          // Exclude server-canonical fields — they are fetched fresh on every login
-          const { pinned: _p, pinnedAt: _pa, lastMessage: _lm, chatTracked: _ct,
+          const { pinned: _p, pinnedAt: _pa, chatTracked: _ct,
                   muted: _m, muteUntil: _mu, mutedAt: _ma, isManuallyUnread: _iu, ...deviceMeta } = meta;
           return [id, deviceMeta];
         })

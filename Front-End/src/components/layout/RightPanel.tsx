@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { api, getApiBaseUrl, getToken } from '@/lib/api';
 import { useAppContext } from '@/context/AppContext';
-import { setConversationBlockStatus, emitConversationMetadataChanged } from '@/services/conversationMetadata';
+import { setConversationBlockStatus, emitConversationMetadataChanged, muteConversation, unmuteConversation } from '@/services/conversationMetadata';
 import { useSignedUrl } from '@/hooks/useSignedUrl';
 import { getSignedUrl, downloadFile } from '@/services/fileUrl';
 import { Avatar } from '../ui/avatar';
@@ -511,8 +511,8 @@ const RightPanel: React.FC = () => {
             );
           }
           return (
-            <div className="p-6 flex flex-col items-center text-center">
-              <div className="h-20 w-20 rounded-2xl bg-secondary flex items-center justify-center text-white text-3xl font-bold shadow-xl shadow-secondary/20 relative overflow-hidden">
+            <div className="p-6 flex flex-col text-center overflow-hidden">
+              <div className="h-20 w-20 rounded-2xl bg-secondary flex items-center justify-center text-white text-3xl font-bold shadow-xl shadow-secondary/20 relative overflow-hidden self-center">
                 <GroupAvatarDisplay avatar={group?.avatar || null} name={group?.name || ''} />
                 {isMeAdmin && (
                   <>
@@ -534,20 +534,20 @@ const RightPanel: React.FC = () => {
                 )}
               </div>
               {isMeAdmin && isEditingName ? (
-                <div className="mt-4 flex items-center gap-2 w-full">
+                <div className="mt-4 flex items-center gap-2 overflow-hidden" style={{ maxWidth: isMobile ? 'calc(100vw - 48px)' : `${panelWidth - 48}px` }}>
                   <input
                     autoFocus
                     value={editingName}
                     onChange={e => setEditingName(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') handleSaveGroupName(); if (e.key === 'Escape') setIsEditingName(false); }}
-                    className="flex-1 text-lg font-bold font-headline text-center bg-muted border border-border rounded-lg px-3 py-1 focus:outline-none focus:border-primary"
+                    className="flex-1 min-w-0 text-lg font-bold font-headline text-center bg-muted border border-border rounded-lg px-3 py-1 focus:outline-none focus:border-primary"
                   />
-                  <button onClick={handleSaveGroupName} className="p-1.5 bg-primary text-white rounded-lg hover:bg-primary/90"><Save className="h-4 w-4" /></button>
+                  <button onClick={handleSaveGroupName} className="p-1.5 bg-primary text-white rounded-lg hover:bg-primary/90 shrink-0"><Save className="h-4 w-4" /></button>
                 </div>
               ) : (
-                <div className="mt-4 flex items-center gap-2 min-w-0 max-w-full px-2">
+                <div className="mt-4 flex items-center gap-2 overflow-hidden px-2" style={{ maxWidth: isMobile ? 'calc(100vw - 48px)' : `${panelWidth - 48}px` }}>
                   <h2
-                    className="text-xl font-bold font-headline text-foreground truncate min-w-0"
+                    className="text-xl font-bold font-headline text-foreground truncate flex-1 min-w-0"
                     title={group?.name}
                   >{group?.name}</h2>
                   {isMeAdmin && (
@@ -558,16 +558,16 @@ const RightPanel: React.FC = () => {
                 </div>
               )}
               {isMeAdmin && isEditingDescription ? (
-                <div className="mt-4 w-full space-y-3">
+                <div className="mt-4 space-y-3 overflow-hidden">
                   <Textarea
                     autoFocus
                     value={editingDescription}
                     onChange={e => setEditingDescription(e.target.value)}
-                    className="min-h-[100px] resize-none rounded-2xl border border-border bg-muted px-3 py-3 text-sm text-foreground focus:border-primary focus:outline-none"
+                    className="w-full min-w-0 min-h-[100px] resize-none rounded-2xl border border-border bg-muted px-3 py-3 text-sm text-foreground focus:border-primary focus:outline-none"
                     placeholder="Add a description for this group..."
                     onKeyDown={e => { if (e.key === 'Escape') setIsEditingDescription(false); }}
                   />
-                  <div className="flex items-center justify-center gap-2">
+                  <div className="flex items-center justify-center gap-2 flex-wrap">
                     <Button size="sm" className="h-10 px-4" onClick={handleSaveGroupDescription}>
                       Save Description
                     </Button>
@@ -591,21 +591,29 @@ const RightPanel: React.FC = () => {
               )}
               <div className="w-full mt-8 space-y-3">
                 {!hasLeftGroup && (
-                  <Button 
-                    variant="outline" 
-                    className="w-full gap-2 rounded-xl h-11 border-border" 
-                    onClick={() => dispatch(
-                      isMuted
-                        ? { type: 'UNMUTE_CONVERSATION', payload: group!.id }
-                        : { type: 'MUTE_CONVERSATION', payload: { conversationId: group!.id, muteUntil: null } }
-                    )}
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2 rounded-xl h-11 border-border"
+                    onClick={async () => {
+                      const convId = group!.id;
+                      if (isMuted) {
+                        dispatch({ type: 'UNMUTE_CONVERSATION', payload: convId });
+                        try { await unmuteConversation(convId); } catch { dispatch({ type: 'MUTE_CONVERSATION', payload: { conversationId: convId, muteUntil: null } }); }
+                      } else {
+                        dispatch({ type: 'MUTE_CONVERSATION', payload: { conversationId: convId, muteUntil: null } });
+                        try { await muteConversation(convId, null); } catch { dispatch({ type: 'UNMUTE_CONVERSATION', payload: convId }); }
+                      }
+                    }}
                   >
                     {isMuted ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
                     <span>{isMuted ? 'Unmute Group' : 'Mute Notifications'}</span>
                   </Button>
                 )}
                 {!hasLeftGroup && group?.ownerId !== state.currentUser?.id && (
-                  <Button variant="ghost" className="w-full text-destructive hover:bg-destructive/10 gap-2 h-11 rounded-xl" onClick={() => dispatch({ type: 'OPEN_MODAL', payload: { type: 'leaveGroup', data: { group } } })}>
+                  <Button variant="ghost" className="w-full text-destructive hover:bg-destructive/10 gap-2 h-11 rounded-xl" onClick={() => {
+                    const currentGroup = state.groups.find(g => g.id === conversation.id) ?? group;
+                    if (currentGroup) dispatch({ type: 'OPEN_MODAL', payload: { type: 'leaveGroup', data: { group: currentGroup } } });
+                  }}>
                     <LogOut className="h-4 w-4" /> Leave Group
                   </Button>
                 )}
@@ -623,34 +631,33 @@ const RightPanel: React.FC = () => {
           const user = state.users.find(u => u.id === userId);
           const isBlocked = state.conversationMeta[conversation.id]?.blocked;
           return (
-            <div className="p-6 flex flex-col items-center text-center">
-              <Avatar name={user?.name || ''} src={user?.avatar} size="xl" status={user?.status} showStatus />
+            <div className="p-6 flex flex-col text-center overflow-hidden">
+              <Avatar name={user?.name || ''} src={user?.avatar} size="xl" status={user?.status} showStatus className="self-center" />
               <h2
-                className="mt-4 text-xl font-bold font-headline text-foreground w-full truncate px-2"
+                className="mt-4 text-xl font-bold font-headline text-foreground truncate px-2"
                 title={user?.name}
               >{user?.name}</h2>
-              <Badge variant="secondary" className="mt-2 bg-secondary/10 text-secondary border-none uppercase tracking-tighter">{user?.role}</Badge>
-              
-              <div className="w-full mt-8 space-y-4 text-left">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-muted rounded-lg text-muted-foreground"><Mail className="h-4 w-4" /></div>
-                  <div className="min-w-0">
+              <Badge variant="secondary" className="mt-2 self-center bg-secondary/10 text-secondary border-none uppercase tracking-tighter">{user?.role}</Badge>
+
+              <div className="mt-8 space-y-4 text-left overflow-hidden">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-muted rounded-lg text-muted-foreground shrink-0"><Mail className="h-4 w-4" /></div>
+                  <div className="min-w-0 flex-1">
                     <p className="text-[10px] text-muted-foreground uppercase font-bold">Email</p>
-                    <p className="text-sm font-bold truncate">{user?.email}</p>
+                    <p className="text-sm font-bold break-all">{user?.email}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-muted rounded-lg text-muted-foreground"><Building className="h-4 w-4" /></div>
-                  <div>
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-muted rounded-lg text-muted-foreground shrink-0"><Building className="h-4 w-4" /></div>
+                  <div className="min-w-0 flex-1">
                     <p className="text-[10px] text-muted-foreground uppercase font-bold">Department</p>
-                    <p className="text-sm font-bold">{user?.department}</p>
+                    <p className="text-sm font-bold break-words">{user?.department}</p>
                   </div>
                 </div>
               </div>
 
-              <div className="w-full mt-8 flex flex-col gap-3">
+              <div className="mt-8 flex flex-col gap-3 overflow-hidden">
                 <div className="flex gap-3">
-                  <Button className="flex-1 rounded-xl h-11 bg-primary text-white hover:bg-primary/90">Message</Button>
                   <Button variant="outline" className="flex-1 rounded-xl h-11 border-border" onClick={() => {
                     navigator.clipboard.writeText(user?.email || '');
                     dispatch({ type: 'ADD_TOAST', payload: { message: 'Email copied to clipboard!', type: 'success' } });
@@ -985,7 +992,7 @@ const RightPanel: React.FC = () => {
       )}
     <div
       className={cn(
-        "border-l bg-card text-card-foreground flex flex-col shrink-0 fixed right-0 transition-transform duration-300 z-[var(--z-right-panel)] shadow-2xl",
+        "border-l bg-card text-card-foreground flex flex-col shrink-0 fixed right-0 transition-transform duration-300 z-[var(--z-right-panel)] shadow-2xl overflow-hidden",
         "top-14 h-[calc(100dvh-3.5rem)]",
         "md:top-[56px] md:h-[calc(100vh-56px)]",
         panel.open ? "translate-x-0" : "translate-x-full shadow-none"
@@ -1060,7 +1067,7 @@ const RightPanel: React.FC = () => {
       </div>
 
       {/* Content Area */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 w-full overflow-x-hidden">
         {renderTabContent()}
       </ScrollArea>
     </div>

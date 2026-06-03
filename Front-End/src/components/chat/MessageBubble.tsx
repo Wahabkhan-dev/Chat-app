@@ -7,7 +7,7 @@ import { useAppContext } from '@/context/AppContext';
 import { cn } from '@/lib/utils';
 import { Avatar } from '../ui/avatar';
 import { format } from 'date-fns';
-import { Reply, Forward, SmilePlus, Edit2, Trash2, MoreHorizontal, Check, X, Ban, Pin, CheckCheck, Clock, Undo2 } from 'lucide-react';
+import { Reply, Forward, SmilePlus, Edit2, Trash2, MoreHorizontal, Check, X, Ban, Pin, CheckCheck, Clock, Undo2, Copy } from 'lucide-react';
 import { getSocket } from '@/services/socket';
 import { api } from '@/lib/api';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -16,6 +16,120 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import FileRenderer from './FileRenderer';
 import LinkPreviewCard from './LinkPreviewCard';
+
+// ─── Inline content parser: URLs, emails, mentions, bold ─────────────────────
+
+const URL_DISPLAY_MAX = 55;
+
+type Segment =
+  | { kind: 'text'; value: string }
+  | { kind: 'url'; raw: string; display: string }
+  | { kind: 'email'; value: string }
+  | { kind: 'everyone-mention' }
+  | { kind: 'user-mention'; name: string; id: string }
+  | { kind: 'bold'; value: string };
+
+function parseSegments(text: string): Segment[] {
+  // Order matters: mentions → bold → URLs → emails
+  const PATTERN = /(@\[everyone\]\(everyone\))|(@\[([^\]]+)\]\(([^)]+)\))|(\*\*(.+?)\*\*)|(https?:\/\/[^\s<]+)|([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/g;
+  const segs: Segment[] = [];
+  let lastIdx = 0;
+  let m: RegExpExecArray | null;
+  while ((m = PATTERN.exec(text)) !== null) {
+    if (m.index > lastIdx) segs.push({ kind: 'text', value: text.slice(lastIdx, m.index) });
+    if (m[1]) {
+      segs.push({ kind: 'everyone-mention' });
+    } else if (m[2]) {
+      segs.push({ kind: 'user-mention', name: m[3] || '', id: m[4] || '' });
+    } else if (m[5]) {
+      segs.push({ kind: 'bold', value: m[6] || '' });
+    } else if (m[7]) {
+      const raw = m[7];
+      segs.push({ kind: 'url', raw, display: raw.length > URL_DISPLAY_MAX ? raw.slice(0, URL_DISPLAY_MAX) + '…' : raw });
+    } else if (m[8]) {
+      segs.push({ kind: 'email', value: m[8] });
+    }
+    lastIdx = m.index + m[0].length;
+  }
+  if (lastIdx < text.length) segs.push({ kind: 'text', value: text.slice(lastIdx) });
+  return segs;
+}
+
+// Inline URL chip with individual copy button
+const UrlLink: React.FC<{ raw: string; display: string; isMe: boolean }> = ({ raw, display, isMe }) => {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    navigator.clipboard.writeText(raw);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <span className="inline-flex items-center gap-0.5 align-baseline">
+      <a
+        href={raw}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={e => e.stopPropagation()}
+        className="underline font-medium break-all transition-colors text-primary hover:text-primary/80"
+      >
+        {display}
+      </a>
+      <button
+        onClick={handleCopy}
+        title={copied ? 'Copied!' : 'Copy link'}
+        className="inline-flex shrink-0 p-0.5 rounded transition-opacity text-muted-foreground hover:text-foreground"
+      >
+        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+      </button>
+    </span>
+  );
+};
+
+// Inline email chip with individual copy button
+const EmailLink: React.FC<{ email: string; isMe: boolean }> = ({ email, isMe }) => {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    navigator.clipboard.writeText(email);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <span className="inline-flex items-center gap-0.5 align-baseline">
+      <a
+        href={`mailto:${email}`}
+        onClick={e => e.stopPropagation()}
+        className="underline font-medium transition-colors text-primary hover:text-primary/80"
+      >
+        {email}
+      </a>
+      <button
+        onClick={handleCopy}
+        title={copied ? 'Copied!' : 'Copy email'}
+        className="inline-flex shrink-0 p-0.5 rounded transition-opacity text-muted-foreground hover:text-foreground"
+      >
+        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+      </button>
+    </span>
+  );
+};
+
+// Converts a line of text into React nodes with interactive links/emails
+function renderSegments(text: string, isMe: boolean): React.ReactNode[] {
+  return parseSegments(text).map((seg, i) => {
+    switch (seg.kind) {
+      case 'text':             return <React.Fragment key={i}>{seg.value}</React.Fragment>;
+      case 'url':              return <UrlLink key={i} raw={seg.raw} display={seg.display} isMe={isMe} />;
+      case 'email':            return <EmailLink key={i} email={seg.value} isMe={isMe} />;
+      case 'everyone-mention': return <span key={i} className="text-white bg-yellow-500 px-1.5 py-0.5 rounded-md font-bold cursor-pointer hover:bg-yellow-600 transition-colors">@everyone</span>;
+      case 'user-mention':     return <span key={i} className="text-accent bg-accent/10 px-1 rounded font-bold cursor-pointer hover:bg-accent/20 transition-colors" data-user-id={seg.id}>@{seg.name}</span>;
+      case 'bold':             return <strong key={i}>{seg.value}</strong>;
+    }
+  });
+}
 
 interface MessageBubbleProps {
   message: Message;
@@ -41,6 +155,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
   const sender = state.users.find(u => String(u.id) === String(message.senderId));
   const isEditing = state.chatUI.editingMessageId === message.id;
   const isDeleted = message.isDeleted;
+  // Sent messages that contain a URL or email get a distinct background color
+  const hasLink = isMe && /(https?:\/\/[^\s]+)|([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/i.test(message.content || '');
 
   const activeConversationId = state.activeConversation?.id || '';
   const repliedMessage = message.replyTo ? 
@@ -191,21 +307,10 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
       if (!rawContent) return null;
 
       const THRESHOLD = 300;
-      const shouldCollapse = !isEditing && rawContent.length > THRESHOLD;
+      const shouldCollapse = !isEditing && !hasLink && rawContent.length > THRESHOLD;
       const displayContent = shouldCollapse && !expanded
         ? rawContent.substring(0, THRESHOLD)
         : rawContent;
-
-      const applyInline = (text: string): string => {
-        let out = text
-          .replace(/@\[everyone\]\(everyone\)/g, '<span class="text-white bg-yellow-500 px-1.5 py-0.5 rounded-md font-bold cursor-pointer hover:bg-yellow-600 transition-colors">@everyone</span>')
-          .replace(/@\[(.*?)\]\((.*?)\)/g, '<span class="text-accent bg-accent/10 px-1 rounded font-bold cursor-pointer hover:bg-accent/20 transition-colors" data-user-id="$2">@$1</span>');
-        out = out.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-        out = out.replace(/(https?:\/\/[^\s<]+)/g, (url) =>
-          `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-blue-500 underline decoration-blue-500/30 hover:decoration-blue-500 transition-all font-medium">${url}</a>`
-        );
-        return out;
-      };
 
       const lines = displayContent.split('\n');
       const nodes: React.ReactNode[] = [];
@@ -222,7 +327,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
           nodes.push(
             <ul key={`ul-${i}`} className="list-disc list-inside space-y-0.5 text-sm leading-relaxed">
               {items.map((item, idx) => (
-                <li key={idx} dangerouslySetInnerHTML={{ __html: applyInline(item) }} />
+                <li key={idx}>{renderSegments(item, isMe)}</li>
               ))}
             </ul>
           );
@@ -235,13 +340,15 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
           nodes.push(
             <ol key={`ol-${i}`} className="list-decimal list-inside space-y-0.5 text-sm leading-relaxed">
               {items.map((item, idx) => (
-                <li key={idx} dangerouslySetInnerHTML={{ __html: applyInline(item) }} />
+                <li key={idx}>{renderSegments(item, isMe)}</li>
               ))}
             </ol>
           );
         } else {
           nodes.push(
-            <p key={`p-${i}`} className="text-sm leading-relaxed whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: applyInline(line) }} />
+            <p key={`p-${i}`} className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+              {renderSegments(line, isMe)}
+            </p>
           );
           i++;
         }
@@ -253,7 +360,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
           {shouldCollapse && (
             <button
               onClick={(e) => { e.stopPropagation(); setExpanded(v => !v); }}
-              className={`mt-1 text-xs font-bold transition-colors ${isMe ? 'text-white/70 hover:text-white' : 'text-primary/70 hover:text-primary'}`}
+              className="mt-1 text-xs font-bold transition-colors text-primary/70 hover:text-primary"
             >
               {expanded ? 'Show less' : '... Show more'}
             </button>
@@ -290,7 +397,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
         </div>
       )}
       
-      <div className={cn('flex flex-col', isEditing ? 'w-full md:max-w-[55%]' : 'max-w-[75%]', isMe ? 'items-end' : 'items-start')}>
+      <div className={cn('flex flex-col', isEditing ? 'w-full md:max-w-[55%]' : 'max-w-[60%]', isMe ? 'items-end' : 'items-start')}>
         {isFirstInGroup && !isMe && state.activeConversation?.type === 'group' && (
           <span className="text-[10px] font-bold text-primary mb-1 uppercase tracking-widest ml-1">{sender?.name}</span>
         )}
@@ -374,8 +481,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
         <div 
           className={cn(
             'p-3 px-4 shadow-sm border relative transition-all duration-300',
-            isMe 
-              ? 'bg-primary text-white border-primary rounded-2xl rounded-tr-none' 
+            isMe
+              ? 'bg-primary/10 text-foreground border-primary/30 rounded-2xl rounded-tr-none'
               : 'bg-card text-card-foreground border-border rounded-2xl rounded-tl-none',
             isEditing && 'w-full shadow-2xl ring-4 ring-primary/10 border-primary',
             (message.content?.includes(state.currentUser?.name || '---') || (message.content?.includes('@[everyone](everyone)') && !isMe)) && 'ring-2 ring-accent/30 bg-accent/5'

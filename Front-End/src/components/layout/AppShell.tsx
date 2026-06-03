@@ -13,7 +13,6 @@ import { useAppContext } from '@/context/AppContext';
 import { useSocket } from '@/hooks/useSocket';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
-import MessageNotificationToast from '../chat/MessageNotificationToast';
 import PushPermissionBanner from '../PushPermissionBanner';
 import SocketStatusBanner from '../SocketStatusBanner';
 import { MessageSquare, FileText, Shield, Settings } from 'lucide-react';
@@ -60,6 +59,30 @@ const AppShell: React.FC = () => {
       setMobileSidebarOpen(false);
     }
   }, [state.activeView]);
+
+  // PWA taskbar badge: show number of conversations with unread messages
+  useEffect(() => {
+    const nav = navigator as any;
+    const uid = String(state.currentUser?.id || '');
+    // The "You" self-DM conv ID — never badge for personal notepad
+    const selfConvId = uid ? `dm_${uid}_${uid}` : null;
+
+    const count = Object.entries(state.conversationMeta).filter(([convId, meta]: [string, any]) => {
+      // Exclude the "You" self-DM — it's a personal notepad, never needs a badge
+      if (selfConvId && convId === selfConvId) return false;
+      // Only count conversations that actually have tracked history with unread messages
+      const hasUnread = (meta.unreadCount || 0) > 0;
+      const hasHistory = meta.chatTracked || !!meta.lastMessage;
+      return hasUnread && hasHistory;
+    }).length;
+
+    if (!('setAppBadge' in navigator)) return;
+    if (count > 0) {
+      nav.setAppBadge(count).catch(() => {});
+    } else {
+      nav.clearAppBadge?.().catch?.(() => {});
+    }
+  }, [state.conversationMeta, state.currentUser?.id]);
 
   useEffect(() => {
     const root = appRef.current;
@@ -274,7 +297,6 @@ const AppShell: React.FC = () => {
       <ForwardMessageModal />
 
       <Toaster />
-      <MessageNotificationToast />
       <PushPermissionBanner />
       <SocketStatusBanner />
     </div>

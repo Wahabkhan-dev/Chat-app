@@ -43,7 +43,12 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const [showScrollPill, setShowScrollPill] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const uploadErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  
+  // Tracks which conversations have been fully fetched from the API this session.
+  // Using state.messages as the guard was wrong: socket-delivered messages populate
+  // state.messages[convId] before the user opens the chat, causing the full history
+  // fetch to be skipped and the user to see only the most recent socket message.
+  const apiLoadedConversations = useRef(new Set<string>());
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -64,8 +69,13 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
       }
     }
 
-    // Only fetch if we haven't loaded messages for this conversation yet
-    if (state.messages[activeConversationId] !== undefined) return;
+    // Skip if we already fetched this conversation's history from the API in this session.
+    // We deliberately do NOT gate on state.messages here — socket messages can pre-populate
+    // state.messages[convId] before the conversation is opened, so that check was causing
+    // the full history to be skipped and only the latest socket message to be shown.
+    if (apiLoadedConversations.current.has(activeConversationId)) return;
+    // Mark as in-flight immediately to prevent double-fetch on fast tab switches
+    apiLoadedConversations.current.add(activeConversationId);
 
     api.get<{ messages: any[] }>(`/messages/${activeConversationId}`)
       .then(({ messages }) => {
@@ -76,6 +86,8 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         }
       })
       .catch((error) => {
+        // Allow retry on next open if the fetch failed
+        apiLoadedConversations.current.delete(activeConversationId);
         console.error(`[ChatArea] failed to load messages for ${activeConversationId}:`, error);
       });
   }, [activeConversationId]);
@@ -140,6 +152,13 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     const otherId = parts[1] === String(state.currentUser?.id) ? parts[2] : parts[1];
     return state.users.find(u => u.id === otherId) || null;
   }, [state.activeConversation, state.currentUser?.id, state.users]);
+
+  // True when the user has opened their own "You" personal chat
+  const isSelfConv = useMemo(() => {
+    if (state.activeConversation?.type !== 'dm' || !state.activeConversation.id) return false;
+    const parts = state.activeConversation.id.split('_');
+    return parts.length >= 3 && parts[1] === parts[2];
+  }, [state.activeConversation]);
 
   useEffect(() => {
     if (scrollRef.current && !state.chatUI.isSearchActive) {
@@ -290,17 +309,22 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
             name={state.activeConversation.name}
             src={state.activeConversation.avatar}
             size="md"
-            status={state.activeConversation.type === 'dm' ? dmUser?.status : undefined}
-            showStatus={state.activeConversation.type === 'dm'}
+            status={state.activeConversation.type === 'dm' && !isSelfConv ? dmUser?.status : undefined}
+            showStatus={state.activeConversation.type === 'dm' && !isSelfConv}
           />
           <div>
             <div className="flex items-center gap-2">
               <h3 className="font-bold text-sm leading-tight group-hover/header:text-primary transition-colors">{state.activeConversation.name}</h3>
+              {isSelfConv && (
+                <span className="text-[8px] font-black uppercase tracking-widest bg-primary/10 text-primary px-1.5 py-0.5 rounded-full border border-primary/20">
+                  YOU
+                </span>
+              )}
               {meta?.muted && (
-                <button 
-                  onClick={(e) => { 
-                    e.stopPropagation(); 
-                    dispatch({ type: 'UNMUTE_CONVERSATION', payload: state.activeConversation!.id }); 
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    dispatch({ type: 'UNMUTE_CONVERSATION', payload: state.activeConversation!.id });
                   }}
                   className="flex items-center gap-1.5 px-2 py-0.5 bg-muted border rounded-full group hover:border-primary/30 transition-all"
                 >
@@ -315,11 +339,13 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
               )}
             </div>
             <p className={cn("text-[11px] font-bold uppercase tracking-wider",
-              state.activeConversation.type === 'dm'
-                ? (dmUser?.status === 'online' ? 'text-green-600' : dmUser?.status === 'away' ? 'text-yellow-500' : dmUser?.status === 'dnd' ? 'text-red-500' : 'text-muted-foreground')
-                : 'text-muted-foreground'
+              isSelfConv
+                ? 'text-primary/70'
+                : state.activeConversation.type === 'dm'
+                  ? (dmUser?.status === 'online' ? 'text-green-600' : dmUser?.status === 'away' ? 'text-yellow-500' : dmUser?.status === 'dnd' ? 'text-red-500' : 'text-muted-foreground')
+                  : 'text-muted-foreground'
             )}>
-              {state.activeConversation.type === 'dm' ? (dmUser?.status || 'offline') : `${group?.members.length || 0} Members`}
+              {isSelfConv ? 'Personal Notepad' : state.activeConversation.type === 'dm' ? (dmUser?.status || 'offline') : `${group?.members.length || 0} Members`}
             </p>
           </div>
         </div>

@@ -32,11 +32,21 @@ export function useSocket() {
       try {
         const uid = stateRef.current.currentUser?.id;
         const stored = uid ? localStorage.getItem(`cmeta_${uid}`) : null;
-        if (!stored) return;
-        const savedMeta = JSON.parse(stored);
-        const toCheck = Object.entries(savedMeta)
+        const savedMeta = stored ? JSON.parse(stored) : {};
+        const fallbackSince = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+        // Conversations with a lastReadAt — use the exact timestamp
+        const toCheck: Array<{ id: string; since: string }> = Object.entries(savedMeta)
           .filter(([, m]: any) => m.lastReadAt)
           .map(([id, m]: any) => ({ id, since: m.lastReadAt }));
+
+        // Groups without a lastReadAt — include with a 30-day fallback so offline
+        // messages received in groups the user never explicitly opened are detected.
+        const checkedIds = new Set(toCheck.map(c => c.id));
+        stateRef.current.groups
+          .filter(g => !stateRef.current.conversationMeta[g.id]?.leftAt && !checkedIds.has(g.id))
+          .forEach(g => toCheck.push({ id: g.id, since: fallbackSince }));
+
         if (toCheck.length === 0) return;
         const { counts, previews } = await api.post<{
           counts: Record<string, number>;
@@ -143,70 +153,74 @@ export function useSocket() {
         try {
           const uid = stateRef.current.currentUser?.id;
           const stored = uid ? localStorage.getItem(`cmeta_${uid}`) : null;
-          if (stored) {
-            const savedMeta = JSON.parse(stored);
-            const toCheck = Object.entries(savedMeta)
-              .filter(([, m]: any) => m.lastReadAt)
-              .map(([id, m]: any) => ({ id, since: m.lastReadAt }));
-            if (toCheck.length > 0) {
-              const { counts, previews } = await api.post<{ counts: Record<string, number>; previews: Record<string, { senderId: string; content: string; type: string; timestamp: string }> }>('/messages/unread-since', { conversations: toCheck });
-              dispatch({ type: 'UPDATE_UNREAD_COUNTS', payload: { counts, previews } });
+          const savedMeta = stored ? JSON.parse(stored) : {};
+          const fallbackSince = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+          const toCheck: Array<{ id: string; since: string }> = Object.entries(savedMeta)
+            .filter(([, m]: any) => m.lastReadAt)
+            .map(([id, m]: any) => ({ id, since: m.lastReadAt }));
+          // Also include groups with no lastReadAt using a 30-day fallback
+          const checkedIds = new Set(toCheck.map((c: any) => c.id));
+          groups
+            .filter((g: any) => !stateRef.current.conversationMeta[g.id]?.leftAt && !checkedIds.has(g.id))
+            .forEach((g: any) => toCheck.push({ id: g.id, since: fallbackSince }));
+          if (toCheck.length > 0) {
+            const { counts, previews } = await api.post<{ counts: Record<string, number>; previews: Record<string, { senderId: string; content: string; type: string; timestamp: string }> }>('/messages/unread-since', { conversations: toCheck });
+            dispatch({ type: 'UPDATE_UNREAD_COUNTS', payload: { counts, previews } });
 
-              // Add bell-panel notifications for each conversation that has offline unread messages.
-              // Uses locally-scoped `users` and `groups` (just fetched) to avoid stale-ref race.
-              const currentUserId = uid || '';
-              Object.entries(counts).forEach(([convId, count]) => {
-                if (Number(count) <= 0) return;
-                // Skip bell notification for muted conversations
-                const convMeta = stateRef.current.conversationMeta[convId];
-                if (convMeta?.muted && (!convMeta.muteUntil || new Date(convMeta.muteUntil) > new Date())) return;
-                const isDm = convId.startsWith('dm_');
-                const preview = previews?.[convId];
-                const rawContent = preview?.content || '';
-                const bodyText = rawContent
-                  ? rawContent.replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1').slice(0, 80) || '📎 Attachment'
-                  : `${count} new message${Number(count) > 1 ? 's' : ''}`;
+            // Add bell-panel notifications for each conversation that has offline unread messages.
+            // Uses locally-scoped `users` and `groups` (just fetched) to avoid stale-ref race.
+            const currentUserId = uid || '';
+            Object.entries(counts).forEach(([convId, count]) => {
+              if (Number(count) <= 0) return;
+              // Skip bell notification for muted conversations
+              const convMeta = stateRef.current.conversationMeta[convId];
+              if (convMeta?.muted && (!convMeta.muteUntil || new Date(convMeta.muteUntil) > new Date())) return;
+              const isDm = convId.startsWith('dm_');
+              const preview = previews?.[convId];
+              const rawContent = preview?.content || '';
+              const bodyText = rawContent
+                ? rawContent.replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1').slice(0, 80) || '📎 Attachment'
+                : `${count} new message${Number(count) > 1 ? 's' : ''}`;
 
-                if (isDm) {
-                  const parts = convId.split('_');
-                  const otherId = parts[1] === String(currentUserId) ? parts[2] : parts[1];
-                  const sender = users.find(u => u.id === otherId);
-                  if (!sender) return;
-                  dispatch({
-                    type: 'ADD_NOTIFICATION',
-                    payload: {
-                      id: `offline_msg_${convId}`,
-                      type: 'dm_message' as any,
-                      recipientId: currentUserId,
-                      senderId: preview?.senderId,
-                      conversationId: convId,
-                      title: sender.name,
-                      body: bodyText,
-                      timestamp: preview?.timestamp || new Date().toISOString(),
-                      read: false,
-                    },
-                  });
-                } else {
-                  const group = groups.find(g => g.id === convId);
-                  if (!group) return;
-                  const senderUser = preview?.senderId ? users.find(u => u.id === preview.senderId) : null;
-                  dispatch({
-                    type: 'ADD_NOTIFICATION',
-                    payload: {
-                      id: `offline_msg_${convId}`,
-                      type: 'group_message' as any,
-                      recipientId: currentUserId,
-                      senderId: preview?.senderId,
-                      conversationId: convId,
-                      title: senderUser ? `${senderUser.name} in ${group.name}` : group.name,
-                      body: bodyText,
-                      timestamp: preview?.timestamp || new Date().toISOString(),
-                      read: false,
-                    },
-                  });
-                }
-              });
-            }
+              if (isDm) {
+                const parts = convId.split('_');
+                const otherId = parts[1] === String(currentUserId) ? parts[2] : parts[1];
+                const sender = users.find(u => u.id === otherId);
+                if (!sender) return;
+                dispatch({
+                  type: 'ADD_NOTIFICATION',
+                  payload: {
+                    id: `offline_msg_${convId}`,
+                    type: 'dm_message' as any,
+                    recipientId: currentUserId,
+                    senderId: preview?.senderId,
+                    conversationId: convId,
+                    title: sender.name,
+                    body: bodyText,
+                    timestamp: preview?.timestamp || new Date().toISOString(),
+                    read: false,
+                  },
+                });
+              } else {
+                const group = groups.find(g => g.id === convId);
+                if (!group) return;
+                const senderUser = preview?.senderId ? users.find(u => u.id === preview.senderId) : null;
+                dispatch({
+                  type: 'ADD_NOTIFICATION',
+                  payload: {
+                    id: `offline_msg_${convId}`,
+                    type: 'group_message' as any,
+                    recipientId: currentUserId,
+                    senderId: preview?.senderId,
+                    conversationId: convId,
+                    title: senderUser ? `${senderUser.name} in ${group.name}` : group.name,
+                    body: bodyText,
+                    timestamp: preview?.timestamp || new Date().toISOString(),
+                    read: false,
+                  },
+                });
+              }
+            });
           }
         } catch { /* best-effort */ }
 
@@ -597,28 +611,10 @@ export function useSocket() {
         playNotificationSound();
       }
 
-      // Message notifications: show the custom in-app card (MessageNotificationToast)
-      // Other notifications: fall back to the shadcn toast
-      if (isMessageNotification && notif.conversationId) {
-        const senderUser = notif.senderId ? s.users.find(u => u.id === String(notif.senderId)) : null;
-        const isDm = notif.type === 'dm_message';
-        const conversationName = isDm
-          ? (senderUser?.name || notif.title)
-          : (s.groups.find(g => g.id === String(notif.conversationId))?.name || notif.title);
-        dispatch({
-          type: 'PUSH_IN_APP_NOTIFICATION',
-          payload: {
-            id: String(notif.id),
-            conversationId: String(notif.conversationId),
-            conversationName,
-            conversationType: isDm ? 'dm' : 'group',
-            senderName: senderUser?.name || notif.title,
-            senderAvatar: senderUser?.avatar || '',
-            message: notif.body,
-            timestamp: notif.timestamp || new Date().toISOString(),
-          },
-        });
-      } else {
+      // Show a small toast for non-message notifications (group admin actions, etc.)
+      // when the tab is in the background. Message notifications are handled via
+      // the sidebar badge and bell panel — no in-app popup is shown for messages.
+      if ((typeof document === 'undefined' || document.visibilityState !== 'visible') && !isMessageNotification) {
         toast({ title: notif.title, description: notif.body });
       }
     });
@@ -715,9 +711,24 @@ export function useSocket() {
         case 'mark_read':
           dispatch({ type: 'MARK_CONVERSATION_READ', payload: conversationId });
           break;
+        case 'favourite':
+        case 'favorite':
+          dispatch({ type: 'PIN_CONVERSATION', payload: conversationId });
+          break;
+        case 'unfavourite':
+        case 'unfavorite':
+          dispatch({ type: 'UNPIN_CONVERSATION', payload: conversationId });
+          break;
         default:
           break;
       }
+    });
+
+    // Sync user settings changes (theme, sound, notifications, etc.) to all active devices
+    socket.on('user_settings_updated', ({ userId, settings }) => {
+      const s = stateRef.current;
+      if (String(userId) !== String(s.currentUser?.id) || !settings) return;
+      dispatch({ type: 'UPDATE_SETTING', payload: settings });
     });
 
     socket.on('all_notifications_read', () => {

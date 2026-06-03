@@ -4,6 +4,12 @@ import { useEffect } from 'react';
 
 export function PwaInit() {
   useEffect(() => {
+    if (screen.orientation && typeof screen.orientation.lock === 'function') {
+      screen.orientation.lock('portrait').catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
     if (!window.isSecureContext) {
       console.warn('[PWA] Service worker registration skipped: secure context required for push notifications');
