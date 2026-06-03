@@ -73,7 +73,7 @@ const GalleryItemView: React.FC<GalleryItemViewProps> = ({
         <div
           ref={containerRef}
           className={cn(
-            'relative w-full h-full overflow-hidden select-none',
+            'w-full h-full flex items-center justify-center overflow-hidden select-none',
             zoomLevel > 1
               ? isDragging ? 'cursor-grabbing' : 'cursor-grab'
               : 'cursor-default'
@@ -88,12 +88,9 @@ const GalleryItemView: React.FC<GalleryItemViewProps> = ({
             alt={file.name}
             draggable={false}
             style={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
               maxWidth: '100%',
               maxHeight: '100%',
-              transform: `translate(calc(-50% + ${panX}px), calc(-50% + ${panY}px)) scale(${zoomLevel})`,
+              transform: `translate(${panX}px, ${panY}px) scale(${zoomLevel})`,
               transformOrigin: 'center center',
               transition: isDragging ? 'none' : 'transform 0.12s ease-out',
               willChange: 'transform',

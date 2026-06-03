@@ -223,7 +223,7 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
 
     if (activeConversation?.type === 'group') {
       const atIndex = value.lastIndexOf('@');
-      if (atIndex !== -1 && (atIndex === 0 || value[atIndex - 1] === ' ' || value[atIndex - 1] === '\n')) {
+      if (atIndex !== -1) {
         const query = value.slice(atIndex + 1);
         if (!query.includes(' ')) {
           setShowMentions(true);
