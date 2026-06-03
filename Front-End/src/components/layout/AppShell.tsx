@@ -44,6 +44,24 @@ const AppShell: React.FC = () => {
   useNotificationPermission();
   usePushNotifications();
 
+  // Prevent pinch-to-zoom and double-tap zoom on mobile (iOS ignores viewport user-scalable since iOS 10)
+  useEffect(() => {
+    const preventGesture = (e: Event) => e.preventDefault();
+    const preventMultiTouch = (e: TouchEvent) => {
+      if (e.touches.length > 1) e.preventDefault();
+    };
+    document.addEventListener('gesturestart', preventGesture, false);
+    document.addEventListener('gesturechange', preventGesture, false);
+    document.addEventListener('gestureend', preventGesture, false);
+    document.addEventListener('touchstart', preventMultiTouch, { passive: false });
+    return () => {
+      document.removeEventListener('gesturestart', preventGesture);
+      document.removeEventListener('gesturechange', preventGesture);
+      document.removeEventListener('gestureend', preventGesture);
+      document.removeEventListener('touchstart', preventMultiTouch);
+    };
+  }, []);
+
   // When a conversation is selected on mobile, slide into chat view
   useEffect(() => {
     if (typeof window === 'undefined') return;

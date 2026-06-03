@@ -81,6 +81,7 @@
 @layer base {
   * {
     @apply border-border;
+    touch-action: manipulation;
   }
   body {
     @apply bg-background text-foreground font-body;
@@ -165,6 +166,10 @@
 @media (max-width: 767px) {
   body {
     overflow-x: hidden;
+  }
+  /* Prevent iOS auto-zoom on input focus (triggers when font-size < 16px) */
+  input, textarea, select {
+    font-size: 16px !important;
   }
   /* Minimum tap target */
   button, [role="button"], a {
