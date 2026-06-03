@@ -337,15 +337,31 @@ const FilePreviewModal: React.FC = () => {
     return <img src={getFileIcon(currentFile.name)} alt="" className="h-4 w-4 object-contain" />;
   };
 
+  const isDoc = ['pdf', 'document', 'docx', 'txt', 'xlsx', 'pptx'].includes(currentFile.type);
+  const isAudio = currentFile.type === 'audio';
+  const isNonPreviewable = !['image', 'video', 'audio', 'pdf', 'document', 'docx', 'txt', 'xlsx', 'pptx'].includes(currentFile.type);
+
+  // Backdrop padding: minimal for docs so they fill the screen
+  const backdropPadding = isDoc ? 'p-2 md:p-3' : 'p-4 md:p-6';
+
+  // Modal size: adapts to content type
+  const modalSize = isDoc
+    ? 'w-full max-w-6xl max-h-[97vh]'          // PDF/docs: near-fullscreen for readability
+    : isAudio || isNonPreviewable
+      ? 'w-full max-w-md'                        // audio player / icon-only: compact
+      : currentFile.type === 'video'
+        ? 'w-full max-w-5xl max-h-[90vh]'        // video: wide
+        : 'w-full max-w-4xl max-h-[90vh]';       // image: current
+
   return (
     // Dark backdrop — clicking here (outside the modal card) closes the preview
     <div
-      className="fixed inset-0 z-[var(--z-modal)] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-150"
+      className={cn('fixed inset-0 z-[var(--z-modal)] bg-black/80 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-150', backdropPadding)}
       onClick={handleClose}
     >
-      {/* Modal card — centered, leaves visible backdrop on all four sides */}
+      {/* Modal card — size adapts to file type */}
       <div
-        className="relative bg-card rounded-2xl shadow-2xl border border-border flex flex-col overflow-hidden w-full max-w-4xl max-h-[85vh] animate-in zoom-in-95 duration-200"
+        className={cn('relative bg-card rounded-2xl shadow-2xl border border-border flex flex-col overflow-hidden animate-in zoom-in-95 duration-200', modalSize)}
         onClick={e => e.stopPropagation()}
       >
         {/* ── Header ── */}

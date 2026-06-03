@@ -616,7 +616,6 @@ const Sidebar: React.FC<{
             <p className={cn('text-sm truncate transition-colors', hasLeft ? 'text-muted-foreground font-semibold' : !isActive && (meta.unreadCount > 0 || meta.hasUnreadMention) && !meta.muted ? 'font-bold text-foreground group-hover:text-primary' : 'font-semibold group-hover:text-primary')}>
               {group.name}
             </p>
-            {meta.pinned && !hasLeft && <Star className="h-2.5 w-2.5 fill-yellow-400 text-yellow-400 shrink-0" />}
             {isAdminOnly && !hasLeft && <Lock className="h-2.5 w-2.5 text-muted-foreground/40 shrink-0" />}
             {hasLeft && <LogOut className="h-2.5 w-2.5 text-muted-foreground/50 shrink-0" />}
           </div>

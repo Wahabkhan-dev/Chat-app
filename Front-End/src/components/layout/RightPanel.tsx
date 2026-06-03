@@ -69,9 +69,14 @@ const ViewFileButton: React.FC<{ fileKey: string; fileName: string }> = ({ fileK
 const MediaThumb: React.FC<{ item: { key?: string; url?: string; thumbnail?: string; fileName: string; type?: string }; onClick: () => void; extraContent?: React.ReactNode }> = ({ item, onClick, extraContent }) => {
   const { url: signedUrl } = useSignedUrl(item.key);
   const src = signedUrl || item.url || item.thumbnail || '';
+  const isVideo = item.type === 'video';
   return (
     <div className="aspect-square rounded-lg overflow-hidden bg-muted cursor-pointer group relative" onClick={onClick}>
-      {src ? (
+      {isVideo ? (
+        <div className="w-full h-full flex items-center justify-center bg-muted/80">
+          <img src="/icons/media.png" alt="video" className="w-8 h-8 object-contain" />
+        </div>
+      ) : src ? (
         <img src={src} alt={item.fileName} className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
