@@ -62,6 +62,59 @@ export function clearSignedUrlCache() {
 }
 
 /**
+ * Returns a backend-proxied URL for a file key.
+ * Use this for operations that need the raw file bytes (e.g. copying to clipboard)
+ * because the direct R2 signed URL is cross-origin and will fail CORS checks.
+ * The /serve endpoint proxies through our Express server which has the correct
+ * CORS + auth headers.
+ */
+export function getServeUrl(key: string): string {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('teams_token') : null;
+  return `${BASE_URL}/files/serve?key=${encodeURIComponent(key)}${token ? `&t=${encodeURIComponent(token)}` : ''}`;
+}
+
+/**
+ * Copy an image to clipboard via canvas PNG conversion.
+ * Uses <img> element for maximum compatibility (avoids createImageBitmap issues).
+ * The toBlob callback keeps the user gesture alive for clipboard.write().
+ */
+export async function copyImageToClipboard(fetchUrl: string): Promise<void> {
+  const res = await fetch(fetchUrl, { mode: 'cors', credentials: 'include' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Canvas context unavailable'));
+        return;
+      }
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob(async (pngBlob) => {
+        if (!pngBlob) {
+          reject(new Error('Canvas toBlob failed'));
+          return;
+        }
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+          resolve();
+        } catch (err) {
+          reject(new Error(`Clipboard: ${(err as Error).message}`));
+        }
+      }, 'image/png');
+    };
+    img.onerror = () => reject(new Error('Image decode failed'));
+    img.src = URL.createObjectURL(blob);
+  });
+}
+
+/**
  * Download a private R2 file without blocking the browser — resolves the signed
  * URL, fetches the content as a Blob, then triggers a save-as dialog.
  */

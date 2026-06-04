@@ -56,6 +56,14 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const activeConversationId = state.activeConversation?.id;
   const rawMessages = activeConversationId ? state.messages[activeConversationId] || [] : [];
 
+  // Immediately clear the local unread badge when the user opens a conversation.
+  // This is instant visual feedback — the socket mark_conversation_read call below
+  // handles the server-side persistence and syncs other devices.
+  useEffect(() => {
+    if (!activeConversationId) return;
+    dispatch({ type: 'MARK_CONVERSATION_READ', payload: activeConversationId });
+  }, [activeConversationId]);
+
   // Load message history + join socket room whenever conversation changes
   useEffect(() => {
     if (!activeConversationId) return;

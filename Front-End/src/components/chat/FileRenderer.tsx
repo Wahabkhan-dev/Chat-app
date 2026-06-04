@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Download, Play, FileIcon, Eye, Loader2, AlertCircle, Copy } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
 import { useSignedUrl } from '@/hooks/useSignedUrl';
-import { downloadFile } from '@/services/fileUrl';
+import { downloadFile, getServeUrl, copyImageToClipboard } from '@/services/fileUrl';
 import { toast } from '@/hooks/use-toast';
 import FileCard from '../ui/FileCard';
 
@@ -77,27 +77,11 @@ const SecureImage: React.FC<{ file: MessageFile; onView: () => void }> = ({ file
     setCtxMenu(null);
     if (!src) return;
     try {
-      // Fetch raw bytes
-      const res = await fetch(src);
-      if (!res.ok) throw new Error('fetch failed');
-      const blob = await res.blob();
-
-      // Convert any format (jpeg, webp, etc.) → PNG via canvas so ClipboardItem always works
-      const bitmap = await createImageBitmap(blob);
-      const canvas = document.createElement('canvas');
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
-      canvas.getContext('2d')!.drawImage(bitmap, 0, 0);
-      bitmap.close();
-
-      const pngBlob = await new Promise<Blob>((resolve, reject) =>
-        canvas.toBlob(b => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png')
-      );
-
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+      const fetchUrl = file.key ? getServeUrl(file.key) : src;
+      await copyImageToClipboard(fetchUrl);
       dispatch({ type: 'ADD_TOAST', payload: { message: 'Image copied', type: 'success' } });
-    } catch {
-      dispatch({ type: 'ADD_TOAST', payload: { message: 'Could not copy image', type: 'error' } });
+    } catch (err) {
+      dispatch({ type: 'ADD_TOAST', payload: { message: `Copy failed: ${(err as Error).message}`, type: 'error' } });
     }
   };
 

@@ -151,6 +151,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
   const { state, dispatch } = useAppContext();
   const [editText, setEditText] = useState(message.content);
   const [expanded, setExpanded] = useState(false);
+  const [textCtxMenu, setTextCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const [hoveredReactionEmoji, setHoveredReactionEmoji] = useState<string | null>(null);
   const isMe = String(message.senderId) === String(state.currentUser?.id);
   const isAdmin = state.currentUser?.role === 'admin';
   const sender = state.users.find(u => String(u.id) === String(message.senderId));
@@ -488,6 +490,25 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
             isEditing && 'w-full shadow-2xl ring-4 ring-primary/10 border-primary',
             (message.content?.includes(state.currentUser?.name || '---') || (message.content?.includes('@[everyone](everyone)') && !isMe)) && 'ring-2 ring-accent/30 bg-accent/5'
           )}
+          onCopy={(e) => {
+            // Override browser clipboard with plain text only — prevents styled HTML
+            // (mention colours, boxes, etc.) from pasting into Word / Docs.
+            const selection = window.getSelection();
+            if (!selection || selection.isCollapsed) return;
+            e.clipboardData.setData('text/plain', selection.toString());
+            e.preventDefault();
+          }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const selection = window.getSelection();
+            // Only show copy menu if text is selected
+            if (selection && !selection.isCollapsed) {
+              const x = Math.min(e.clientX, window.innerWidth - 150);
+              const y = Math.min(e.clientY, window.innerHeight - 50);
+              setTextCtxMenu({ x, y });
+            }
+          }}
         >
           {renderContent()}
         </div>
@@ -496,18 +517,80 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
           <div className={cn("flex flex-wrap gap-1 mt-1.5", isMe ? "justify-end" : "justify-start")}>
             {message.reactions.map((r, i) => {
               const hasReacted = r.users.includes(state.currentUser?.id || '');
+              const reactedUsers = state.users.filter(u => r.users.includes(u.id));
               return (
-                <button 
-                  key={i} 
-                  onClick={(e) => { e.stopPropagation(); handleReaction(r.emoji); }}
-                  className={cn(
-                    "px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1.5 border transition-all hover:scale-110",
-                    hasReacted ? "bg-primary/20 border-primary text-primary font-bold" : "bg-muted border-border text-muted-foreground hover:bg-muted/80"
-                  )}
+                <div
+                  key={i}
+                  onMouseEnter={() => setHoveredReactionEmoji(r.emoji)}
+                  onMouseLeave={() => setHoveredReactionEmoji(null)}
+                  className="relative inline-block"
                 >
-                  <span>{r.emoji}</span>
-                  {r.users.length > 1 && <span>{r.users.length}</span>}
-                </button>
+                  <button
+                    data-reaction-emoji={r.emoji}
+                    onClick={(e) => { e.stopPropagation(); handleReaction(r.emoji); }}
+                    className={cn(
+                      "px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1.5 border transition-all hover:scale-110",
+                      hasReacted ? "bg-primary/20 border-primary text-primary font-bold" : "bg-muted border-border text-muted-foreground hover:bg-muted/80"
+                    )}
+                  >
+                    <span>{r.emoji}</span>
+                    {r.users.length > 1 && <span>{r.users.length}</span>}
+                  </button>
+
+                  {/* Popover showing who reacted — using fixed position to avoid parent overflow clipping */}
+                  {hoveredReactionEmoji === r.emoji && reactedUsers.length > 0 && (() => {
+                    const rect = document.querySelector(`[data-reaction-emoji="${r.emoji}"]`)?.getBoundingClientRect();
+                    if (!rect) return null;
+                    return (
+                      <div
+                        className="fixed z-50 bg-card border border-border rounded-xl shadow-2xl p-3 min-w-[240px] max-w-[320px]"
+                        style={{
+                          top: `${rect.bottom + 8}px`,
+                          left: `${Math.max(8, Math.min(rect.left + rect.width / 2 - 120, window.innerWidth - 328))}px`,
+                        }}
+                      >
+                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3">
+                          Reacted with {r.emoji}
+                        </p>
+                        <div className="space-y-2.5 max-h-[320px] overflow-y-auto pr-1">
+                          {reactedUsers.map(user => (
+                            <button
+                              key={user.id}
+                              onClick={() => {
+                                // Create DM conversation ID
+                                const userId = state.currentUser?.id;
+                                const a = Number(userId);
+                                const b = Number(user.id);
+                                const dmId = `dm_${Math.min(a, b)}_${Math.max(a, b)}`;
+
+                                // Jump to the DM
+                                dispatch({
+                                  type: 'SET_ACTIVE_CONVERSATION',
+                                  payload: { type: 'dm', id: dmId, name: user.name, avatar: user.avatar }
+                                });
+                                dispatch({ type: 'SET_ACTIVE_VIEW', payload: 'chat' });
+                                setHoveredReactionEmoji(null);
+                              }}
+                              className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-muted transition-colors cursor-pointer text-left"
+                            >
+                              <Avatar
+                                name={user.name}
+                                src={user.avatar}
+                                size="sm"
+                                status={user.status as any}
+                                showStatus={true}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold text-foreground truncate">{user.name}</p>
+                                <p className="text-[9px] text-muted-foreground uppercase tracking-tighter">{user.department}</p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
               );
             })}
           </div>
@@ -524,6 +607,29 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
         )}
 
       </div>
+
+      {/* Custom context menu — appears on right-click of selected text */}
+      {textCtxMenu && (
+        <div
+          className="fixed bg-card border border-border rounded-lg shadow-2xl py-1 z-[9999]"
+          style={{ left: `${textCtxMenu.x}px`, top: `${textCtxMenu.y}px` }}
+          onMouseLeave={() => setTextCtxMenu(null)}
+        >
+          <button
+            className="w-full px-4 py-2 flex items-center gap-2 hover:bg-muted text-sm font-medium text-foreground transition-colors"
+            onClick={() => {
+              const selection = window.getSelection();
+              if (selection && !selection.isCollapsed) {
+                navigator.clipboard.writeText(selection.toString());
+                dispatch({ type: 'ADD_TOAST', payload: { message: 'Text copied', type: 'success' } });
+              }
+              setTextCtxMenu(null);
+            }}
+          >
+            <Copy className="h-4 w-4" /> Copy
+          </button>
+        </div>
+      )}
     </div>
   );
 };

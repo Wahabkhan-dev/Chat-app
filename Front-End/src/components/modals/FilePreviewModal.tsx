@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSignedUrl } from '@/hooks/useSignedUrl';
-import { downloadFile } from '@/services/fileUrl';
+import { downloadFile, getServeUrl, copyImageToClipboard } from '@/services/fileUrl';
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
@@ -338,29 +338,14 @@ const FilePreviewModal: React.FC = () => {
   };
 
   const handleCopyImage = async () => {
-    if (!imageCopyUrl) return;
+    if (!currentFile) return;
+    const fetchUrl = currentFile.key ? getServeUrl(currentFile.key) : imageCopyUrl;
+    if (!fetchUrl) return;
     try {
-      // Fetch raw bytes
-      const res = await fetch(imageCopyUrl);
-      if (!res.ok) throw new Error('fetch failed');
-      const blob = await res.blob();
-
-      // Convert any format (jpeg, webp, etc.) → PNG via canvas so ClipboardItem always works
-      const bitmap = await createImageBitmap(blob);
-      const canvas = document.createElement('canvas');
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
-      canvas.getContext('2d')!.drawImage(bitmap, 0, 0);
-      bitmap.close();
-
-      const pngBlob = await new Promise<Blob>((resolve, reject) =>
-        canvas.toBlob(b => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png')
-      );
-
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+      await copyImageToClipboard(fetchUrl);
       dispatch({ type: 'ADD_TOAST', payload: { message: 'Image copied', type: 'success' } });
-    } catch {
-      dispatch({ type: 'ADD_TOAST', payload: { message: 'Could not copy image', type: 'error' } });
+    } catch (err) {
+      dispatch({ type: 'ADD_TOAST', payload: { message: `Copy failed: ${(err as Error).message}`, type: 'error' } });
     }
   };
 

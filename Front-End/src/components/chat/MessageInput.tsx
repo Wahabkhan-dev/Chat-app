@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useAppContext } from '@/context/AppContext';
-import { Paperclip, Send, Smile, X, CornerDownRight, AtSign, Lock, ShieldAlert, Plus, Search, FileText, File as FileIcon, Play, Video, LogOut, UserX } from 'lucide-react';
+import { Paperclip, Send, Smile, X, CornerDownRight, AtSign, Lock, ShieldAlert, Plus, Search, FileText, File as FileIcon, Play, Video, LogOut, UserX, ClipboardPaste } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Message, MessageFile } from '@/mock/messages';
@@ -95,7 +95,8 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
   const { state, dispatch } = useAppContext();
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
-  
+  const [inputCtxMenu, setInputCtxMenu] = useState<{ x: number; y: number } | null>(null);
+
   const [showMentions, setShowMentions] = useState(false);
   const [mentionSearch, setMentionSearch] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -174,8 +175,14 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
 
     prevConvId.current = newId;
 
-    // Allow auto-save again after this render cycle completes
-    requestAnimationFrame(() => { isSwitching.current = false; });
+    // Allow auto-save again after this render cycle completes, then auto-focus
+    // the textarea on desktop so the user can type immediately without clicking.
+    requestAnimationFrame(() => {
+      isSwitching.current = false;
+      if (typeof window !== 'undefined' && window.innerWidth >= 768) {
+        textareaRef.current?.focus();
+      }
+    });
   }, [activeConversation?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-save draft when uploaded files are added / removed
@@ -552,6 +559,13 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
             rows={1}
             value={inputText}
             onChange={handleInputChange}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const x = Math.min(e.clientX, window.innerWidth - 150);
+              const y = Math.min(e.clientY, window.innerHeight - 50);
+              setInputCtxMenu({ x, y });
+            }}
             onKeyDown={(e) => {
               if (showMentions) {
                 if (e.key === 'ArrowDown') { e.preventDefault(); setHighlightedIndex(i => (i + 1) % filteredMembers.length); }
@@ -650,6 +664,78 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
             </button>
           </div>
         </form>
+
+        {/* Custom context menu — appears on right-click in textarea */}
+        {inputCtxMenu && (
+          <div
+            className="fixed bg-card border border-border rounded-lg shadow-2xl py-1 z-[9999]"
+            style={{ left: `${inputCtxMenu.x}px`, top: `${inputCtxMenu.y}px` }}
+            onMouseLeave={() => setInputCtxMenu(null)}
+          >
+            <button
+              className="w-full px-4 py-2 flex items-center gap-2 hover:bg-muted text-sm font-medium text-foreground transition-colors"
+              onClick={async () => {
+                setInputCtxMenu(null);
+                try {
+                  // Try to read clipboard items (images, files, etc.)
+                  const items = await navigator.clipboard.read();
+                  let processedSomething = false;
+
+                  for (const item of items) {
+                    // Check for image types
+                    const imageTypes = Array.from(item.types).filter(t => t.startsWith('image/'));
+                    if (imageTypes.length > 0) {
+                      const blob = await item.getType(imageTypes[0]);
+                      const filename = `pasted-image.${imageTypes[0].split('/')[1] || 'png'}`;
+                      const file = new File([blob], filename, { type: imageTypes[0] });
+                      processFiles([file]);
+                      processedSomething = true;
+                    }
+
+                    // Check for generic file types (any non-text type)
+                    const fileTypes = Array.from(item.types).filter(t => !t.startsWith('text/'));
+                    if (fileTypes.length > 0 && !imageTypes.length) {
+                      for (const type of fileTypes) {
+                        const blob = await item.getType(type);
+                        const ext = type.split('/')[1] || 'file';
+                        const filename = `pasted-file.${ext}`;
+                        const file = new File([blob], filename, { type });
+                        processFiles([file]);
+                        processedSomething = true;
+                      }
+                    }
+                  }
+
+                  // If no files found, try to paste text
+                  if (!processedSomething) {
+                    try {
+                      const text = await navigator.clipboard.readText();
+                      if (text) {
+                        setInputText(inputText + text);
+                        dispatch({ type: 'ADD_TOAST', payload: { message: 'Text pasted', type: 'success' } });
+                      }
+                    } catch {
+                      // Text read failed, no problem
+                    }
+                  }
+                } catch (err) {
+                  // Try fallback text-only paste
+                  try {
+                    const text = await navigator.clipboard.readText();
+                    if (text) {
+                      setInputText(inputText + text);
+                      dispatch({ type: 'ADD_TOAST', payload: { message: 'Text pasted', type: 'success' } });
+                    }
+                  } catch {
+                    dispatch({ type: 'ADD_TOAST', payload: { message: 'Could not paste from clipboard', type: 'error' } });
+                  }
+                }
+              }}
+            >
+              <ClipboardPaste className="h-4 w-4" /> Paste
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
