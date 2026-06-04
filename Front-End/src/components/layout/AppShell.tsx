@@ -44,6 +44,17 @@ const AppShell: React.FC = () => {
   useNotificationPermission();
   usePushNotifications();
 
+  // iOS keyboard fix: set height via JS so the keyboard never pushes content off-screen.
+  // CSS dvh/svh units are unreliable on iOS Safari when the virtual keyboard opens.
+  useEffect(() => {
+    const root = appRef.current;
+    if (!root) return;
+    const setHeight = () => { root.style.height = `${window.innerHeight}px`; };
+    setHeight();
+    window.addEventListener('resize', setHeight);
+    return () => window.removeEventListener('resize', setHeight);
+  }, []);
+
   // Prevent pinch-to-zoom and double-tap zoom on mobile (iOS ignores viewport user-scalable since iOS 10)
   useEffect(() => {
     const preventGesture = (e: Event) => e.preventDefault();
@@ -190,7 +201,7 @@ const AppShell: React.FC = () => {
   return (
     <div
       ref={appRef}
-      className="flex h-[100dvh] w-full bg-background text-foreground overflow-hidden"
+      className="flex w-full bg-background text-foreground overflow-hidden"
     >
       {/* ── Sidebar / Conversation List — hidden for admin users ── */}
       {!isAdmin && (

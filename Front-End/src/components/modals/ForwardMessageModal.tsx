@@ -70,21 +70,22 @@ const ForwardMessageModal: React.FC = () => {
     return new File([blob], file.name || 'attachment', { type: file.mimeType || blob.type || 'application/octet-stream' });
   };
 
-  const buildForwardFiles = async (messageFiles: any[], conversationId: string, originMessageId?: number) => {
+  const buildForwardFiles = async (messageFiles: any[], conversationId: string) => {
+    // Files that already live in R2 — pass the key directly, no re-upload needed
     const persistedFiles = messageFiles
       .filter((file) => file && typeof file.key === 'string' && file.key.trim())
       .map((file) => ({ key: file.key, name: file.name, size: file.size, type: file.type, mimeType: file.mimeType }));
 
+    // Files with no R2 key must be fetched from their source URL and re-uploaded
     const uploadCandidates = messageFiles
-      .filter((file) => file && (!file.key || !String(file.key).trim()))
-      .map((file) => normalizeFile(file));
+      .filter((file) => file && (!file.key || !String(file.key).trim()));
 
     if (uploadCandidates.length === 0) {
       return persistedFiles;
     }
 
-    const filesToUpload = await Promise.all(uploadCandidates);
-    const uploaded = await uploadFilesToR2(filesToUpload, conversationId, originMessageId);
+    const filesToUpload = await Promise.all(uploadCandidates.map(normalizeFile));
+    const uploaded = await uploadFilesToR2(filesToUpload, conversationId);
     return [...persistedFiles, ...uploaded];
   };
 
@@ -99,36 +100,36 @@ const ForwardMessageModal: React.FC = () => {
     }
 
     setIsForwarding(true);
+
+    // Build file list first — errors here are caught before we even emit
+    let files: any[] = [];
     try {
-      const originMessageId = Number(message.id) || undefined;
-      const rawContent = message.content || '';
-      const trimmedContent = rawContent.replace(/^(?:\[Forwarded\]:\s*)+/i, '').trim();
-      const content = trimmedContent.length > 0 ? `[Forwarded]: ${trimmedContent}` : '[Forwarded]: ';
-      const files = message.files?.length ? await buildForwardFiles(message.files, conversationId, originMessageId) : [];
-      socket.emit(
-        'send_message',
-        {
-          conversationId,
-          content,
-          type: 'text',
-          files,
-        },
-        (ack: { success: boolean; message?: any; error?: string }) => {
-          if (ack?.success && ack.message) {
-            dispatch({ type: 'SEND_MESSAGE', payload: { conversationId, message: ack.message } });
-            toast({ title: 'Message Forwarded', description: `Sent to ${targetName}` });
-            handleClose();
-          } else {
-            toast({ title: 'Forward failed', description: ack?.error || 'Unable to forward message.', variant: 'destructive' });
-          }
-        }
-      );
+      files = message.files?.length ? await buildForwardFiles(message.files, conversationId) : [];
     } catch (err: any) {
-      console.error('[ForwardMessageModal] forward error:', err);
-      toast({ title: 'Forward failed', description: err.message || 'Unable to forward file attachments.', variant: 'destructive' });
-    } finally {
+      toast({ title: 'Forward failed', description: err.message || 'Could not prepare file attachments.', variant: 'destructive' });
       setIsForwarding(false);
+      return;
     }
+
+    const rawContent = message.content || '';
+    const trimmedContent = rawContent.replace(/^(?:\[Forwarded\]:\s*)+/i, '').trim();
+    const content = trimmedContent ? `[Forwarded]: ${trimmedContent}` : '[Forwarded]: ';
+
+    socket.emit(
+      'send_message',
+      { conversationId, content, type: 'text', files },
+      (ack: { success: boolean; message?: any; error?: string }) => {
+        setIsForwarding(false);
+        if (ack?.success && ack.message) {
+          // Merge the resolved files into the dispatched message so attachments render immediately
+          dispatch({ type: 'SEND_MESSAGE', payload: { conversationId, message: { ...ack.message, files } } });
+          toast({ title: 'Message Forwarded', description: `Sent to ${targetName}` });
+          handleClose();
+        } else {
+          toast({ title: 'Forward failed', description: ack?.error || 'Unable to forward message.', variant: 'destructive' });
+        }
+      }
+    );
   };
 
   const currentUserId = String(state.currentUser?.id || '');

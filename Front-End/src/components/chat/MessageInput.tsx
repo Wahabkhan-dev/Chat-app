@@ -479,6 +479,9 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
                   setTimeout(() => textarea.setSelectionRange(start + 2, end + 2), 0);
                 }
               } else if (e.key === 'Enter' && !e.shiftKey) {
+                // On mobile (touch screen or narrow viewport) let Enter create a newline;
+                // the Send button is the primary send action on mobile.
+                if (typeof window !== 'undefined' && window.innerWidth < 768) return;
                 const textarea = textareaRef.current;
                 if (textarea) {
                   const cursorPos = textarea.selectionStart;

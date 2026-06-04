@@ -66,13 +66,14 @@ const UrlLink: React.FC<{ raw: string; display: string; isMe: boolean }> = ({ ra
     setTimeout(() => setCopied(false), 2000);
   };
   return (
-    <span className="inline-flex items-center gap-0.5 align-baseline">
+    <span className="inline-flex items-center gap-0.5 align-baseline max-w-full min-w-0 overflow-hidden">
       <a
         href={raw}
         target="_blank"
         rel="noopener noreferrer"
         onClick={e => e.stopPropagation()}
-        className="underline font-medium break-all transition-colors text-primary hover:text-primary/80"
+        className="underline font-medium break-all min-w-0 transition-colors text-primary hover:text-primary/80"
+        style={{ wordBreak: 'break-all', overflowWrap: 'anywhere' }}
       >
         {display}
       </a>
@@ -346,7 +347,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
           );
         } else {
           nodes.push(
-            <p key={`p-${i}`} className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+            <p key={`p-${i}`} className="text-sm leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere] break-all max-w-full">
               {renderSegments(line, isMe)}
             </p>
           );
@@ -397,7 +398,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
         </div>
       )}
       
-      <div className={cn('flex flex-col', isEditing ? 'w-full md:max-w-[55%]' : 'max-w-[60%]', isMe ? 'items-end' : 'items-start')}>
+      <div className={cn('flex flex-col min-w-0', isEditing ? 'w-full md:max-w-[55%]' : 'max-w-[85%] md:max-w-[60%]', isMe ? 'items-end' : 'items-start')}>
         {isFirstInGroup && !isMe && state.activeConversation?.type === 'group' && (
           <span className="text-[10px] font-bold text-primary mb-1 uppercase tracking-widest ml-1">{sender?.name}</span>
         )}
@@ -478,9 +479,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
           </div>
         )}
 
-        <div 
+        <div
           className={cn(
-            'p-3 px-4 shadow-sm border relative transition-all duration-300',
+            'p-3 px-4 shadow-sm border relative transition-all duration-300 overflow-hidden min-w-0 max-w-full',
             isMe
               ? 'bg-primary/10 text-foreground border-primary/30 rounded-2xl rounded-tr-none'
               : 'bg-card text-card-foreground border-border rounded-2xl rounded-tl-none',

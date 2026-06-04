@@ -7,7 +7,7 @@ import { MessageFile } from '@/mock/messages';
 import { Button } from '@/components/ui/button';
 import {
   Download, X, ZoomIn, AlertCircle, Plus, Minus,
-  ChevronLeft, ChevronRight, Loader2,
+  ChevronLeft, ChevronRight, Loader2, Copy,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSignedUrl } from '@/hooks/useSignedUrl';
@@ -41,6 +41,7 @@ interface GalleryItemViewProps {
   onMouseDown?: (e: React.MouseEvent) => void;
   onMouseMove?: (e: React.MouseEvent) => void;
   onMouseUp?: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }
 
 const GalleryItemView: React.FC<GalleryItemViewProps> = ({
@@ -53,6 +54,7 @@ const GalleryItemView: React.FC<GalleryItemViewProps> = ({
   onMouseDown,
   onMouseMove,
   onMouseUp,
+  onContextMenu,
 }) => {
   const { url: signedUrl, loading } = useSignedUrl(file.key || undefined);
   const displayUrl = signedUrl || file.url || '';
@@ -94,6 +96,7 @@ const GalleryItemView: React.FC<GalleryItemViewProps> = ({
           onMouseMove={onMouseMove}
           onMouseUp={onMouseUp}
           onMouseLeave={onMouseUp}
+          onContextMenu={onContextMenu}
         >
           <img
             src={displayUrl}
@@ -199,6 +202,10 @@ const FilePreviewModal: React.FC = () => {
 
   const currentFile = items[currentIndex];
   const isImage = currentFile?.type === 'image';
+
+  // Resolve signed URL for the copy action (called unconditionally — hook rules)
+  const { url: copySignedUrl } = useSignedUrl(currentFile?.key || undefined);
+  const imageCopyUrl = copySignedUrl || currentFile?.url || '';
 
   const handleClose = useCallback(() => {
     dispatch({ type: 'CLOSE_GALLERY' });
@@ -330,6 +337,33 @@ const FilePreviewModal: React.FC = () => {
     }
   };
 
+  const handleCopyImage = async () => {
+    if (!imageCopyUrl) return;
+    try {
+      // Fetch raw bytes
+      const res = await fetch(imageCopyUrl);
+      if (!res.ok) throw new Error('fetch failed');
+      const blob = await res.blob();
+
+      // Convert any format (jpeg, webp, etc.) → PNG via canvas so ClipboardItem always works
+      const bitmap = await createImageBitmap(blob);
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      canvas.getContext('2d')!.drawImage(bitmap, 0, 0);
+      bitmap.close();
+
+      const pngBlob = await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob(b => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png')
+      );
+
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+      dispatch({ type: 'ADD_TOAST', payload: { message: 'Image copied', type: 'success' } });
+    } catch {
+      dispatch({ type: 'ADD_TOAST', payload: { message: 'Could not copy image', type: 'error' } });
+    }
+  };
+
   if (!open || !currentFile) return null;
 
   const getIcon = () => {
@@ -338,30 +372,28 @@ const FilePreviewModal: React.FC = () => {
   };
 
   const isDoc = ['pdf', 'document', 'docx', 'txt', 'xlsx', 'pptx'].includes(currentFile.type);
-  const isAudio = currentFile.type === 'audio';
-  const isNonPreviewable = !['image', 'video', 'audio', 'pdf', 'document', 'docx', 'txt', 'xlsx', 'pptx'].includes(currentFile.type);
-
-  // Backdrop padding: minimal for docs so they fill the screen
-  const backdropPadding = isDoc ? 'p-2 md:p-3' : 'p-4 md:p-6';
-
-  // Modal size: adapts to content type
-  const modalSize = isDoc
-    ? 'w-full max-w-6xl max-h-[97vh]'          // PDF/docs: near-fullscreen for readability
-    : isAudio || isNonPreviewable
-      ? 'w-full max-w-md'                        // audio player / icon-only: compact
-      : currentFile.type === 'video'
-        ? 'w-full max-w-5xl max-h-[90vh]'        // video: wide
-        : 'w-full max-w-4xl max-h-[90vh]';       // image: current
 
   return (
-    // Dark backdrop — clicking here (outside the modal card) closes the preview
+    // Dark backdrop — p-2 on all devices to maximise modal space
     <div
-      className={cn('fixed inset-0 z-[var(--z-modal)] bg-black/80 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-150', backdropPadding)}
+      className="fixed inset-0 z-[var(--z-modal)] bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 md:p-3 animate-in fade-in duration-150"
       onClick={handleClose}
     >
-      {/* Modal card — size adapts to file type */}
+      {/*
+        Modal sizing strategy:
+        • PDFs / docs  → 98vw × 97vh  — near-fullscreen so content is readable
+        • Images/video → 95vw × 95vh  — fills the viewport on mobile portrait;
+                          md:max-w-4xl caps width on desktop for a clean look
+        The image/content inside always uses max-width/max-height 100% so it
+        naturally fills whichever dimension is smaller.
+      */}
       <div
-        className={cn('relative bg-card rounded-2xl shadow-2xl border border-border flex flex-col overflow-hidden animate-in zoom-in-95 duration-200', modalSize)}
+        className={cn(
+          'relative bg-card rounded-2xl shadow-2xl border border-border flex flex-col overflow-hidden animate-in zoom-in-95 duration-200',
+          isDoc
+            ? 'w-full max-w-[98vw] h-[97vh]'
+            : 'w-[95vw] md:w-full md:max-w-4xl h-[95vh]'
+        )}
         onClick={e => e.stopPropagation()}
       >
         {/* ── Header ── */}
@@ -384,6 +416,18 @@ const FilePreviewModal: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {isImage && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 rounded-xl border-border hidden sm:flex font-bold text-xs"
+                onClick={handleCopyImage}
+                title="Copy image to clipboard"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                Copy
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -433,6 +477,7 @@ const FilePreviewModal: React.FC = () => {
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
+              onContextMenu={isImage ? (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); handleCopyImage(); } : undefined}
             />
           </div>
         </div>

@@ -368,7 +368,7 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         <div className="flex items-center gap-0 md:gap-1 shrink-0">
           <button
             onClick={() => dispatch({ type: 'SET_CHAT_SEARCH', payload: { active: !state.chatUI.isSearchActive, query: '' } })}
-            className={cn('p-2 rounded-full transition-all h-9 w-9 flex items-center justify-center', state.chatUI.isSearchActive ? 'bg-muted text-primary' : 'hover:bg-muted text-muted-foreground')}
+            className={cn('p-2 rounded-full transition-all h-9 w-9 hidden md:flex items-center justify-center', state.chatUI.isSearchActive ? 'bg-muted text-primary' : 'hover:bg-muted text-muted-foreground')}
           >
             <Search className="h-4 w-4" />
           </button>
@@ -441,7 +441,7 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
 
       {/* Messages */}
       <div
-        className="flex-1 overflow-y-auto p-3 md:p-6 scrollbar-chat scroll-smooth relative touch-scroll"
+        className="flex-1 overflow-y-auto overflow-x-hidden p-3 md:p-6 scrollbar-chat scroll-smooth relative touch-scroll"
         ref={scrollRef}
         onScroll={handleScroll}
       >

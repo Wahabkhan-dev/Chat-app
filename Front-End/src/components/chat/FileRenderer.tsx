@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { MessageFile } from '@/mock/messages';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { Download, Play, FileIcon, Eye, Loader2, AlertCircle } from 'lucide-react';
+import { Download, Play, FileIcon, Eye, Loader2, AlertCircle, Copy } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
 import { useSignedUrl } from '@/hooks/useSignedUrl';
 import { downloadFile } from '@/services/fileUrl';
@@ -36,6 +36,8 @@ interface FileRendererProps {
 const SecureImage: React.FC<{ file: MessageFile; onView: () => void }> = ({ file, onView }) => {
   const { url, loading, error } = useSignedUrl(file.key);
   const [downloading, setDownloading] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const { dispatch } = useAppContext();
   const src = file.key ? url : file.url;
 
   const handleDownload = async (e: React.MouseEvent) => {
@@ -63,6 +65,42 @@ const SecureImage: React.FC<{ file: MessageFile; onView: () => void }> = ({ file
     }
   };
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const x = Math.min(e.clientX, window.innerWidth - 180);
+    const y = Math.min(e.clientY, window.innerHeight - 60);
+    setCtxMenu({ x, y });
+  };
+
+  const handleCopyImage = async () => {
+    setCtxMenu(null);
+    if (!src) return;
+    try {
+      // Fetch raw bytes
+      const res = await fetch(src);
+      if (!res.ok) throw new Error('fetch failed');
+      const blob = await res.blob();
+
+      // Convert any format (jpeg, webp, etc.) → PNG via canvas so ClipboardItem always works
+      const bitmap = await createImageBitmap(blob);
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      canvas.getContext('2d')!.drawImage(bitmap, 0, 0);
+      bitmap.close();
+
+      const pngBlob = await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob(b => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png')
+      );
+
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+      dispatch({ type: 'ADD_TOAST', payload: { message: 'Image copied', type: 'success' } });
+    } catch {
+      dispatch({ type: 'ADD_TOAST', payload: { message: 'Could not copy image', type: 'error' } });
+    }
+  };
+
   if (loading) return (
     <div className="w-[220px] h-[160px] rounded-xl bg-muted flex items-center justify-center border border-border">
       <Loader2 className="h-6 w-6 text-muted-foreground animate-spin" />
@@ -82,25 +120,46 @@ const SecureImage: React.FC<{ file: MessageFile; onView: () => void }> = ({ file
   );
 
   return (
-    <div
-      className="relative max-w-[320px] rounded-xl overflow-hidden group cursor-pointer border border-border shadow-sm"
-      onClick={onView}
-    >
-      <img
-        src={src!}
-        alt={file.name}
-        loading="lazy"
-        className="w-full h-auto object-contain max-h-[400px] transition-transform group-hover:scale-105"
-      />
-      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-        <Button variant="secondary" size="sm" className="h-8 w-8 p-0 rounded-full shadow-lg" onClick={(e) => { e.stopPropagation(); onView(); }}>
-          <Eye className="h-4 w-4" />
-        </Button>
-        <Button variant="secondary" size="sm" className="h-8 w-8 p-0 rounded-full shadow-lg" disabled={downloading} onClick={handleDownload}>
-          {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-        </Button>
+    <>
+      <div
+        className="relative max-w-[320px] rounded-xl overflow-hidden group cursor-pointer border border-border shadow-sm"
+        onClick={onView}
+        onContextMenu={handleContextMenu}
+      >
+        <img
+          src={src!}
+          alt={file.name}
+          loading="lazy"
+          className="w-full h-auto object-contain max-h-[400px] transition-transform group-hover:scale-105"
+        />
+        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+          <Button variant="secondary" size="sm" className="h-8 w-8 p-0 rounded-full shadow-lg" onClick={(e) => { e.stopPropagation(); onView(); }}>
+            <Eye className="h-4 w-4" />
+          </Button>
+          <Button variant="secondary" size="sm" className="h-8 w-8 p-0 rounded-full shadow-lg" disabled={downloading} onClick={handleDownload}>
+            {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          </Button>
+        </div>
       </div>
-    </div>
+
+      {ctxMenu && (
+        <>
+          <div className="fixed inset-0 z-[49]" onClick={() => setCtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }} />
+          <div
+            className="fixed z-50 bg-card border border-border shadow-2xl py-1.5 rounded-xl min-w-[160px] animate-in zoom-in-95 duration-150"
+            style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          >
+            <button
+              onClick={handleCopyImage}
+              className="w-full px-3 py-2 text-left text-xs font-semibold hover:bg-muted flex items-center gap-2.5 transition-colors"
+            >
+              <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+              Copy Image
+            </button>
+          </div>
+        </>
+      )}
+    </>
   );
 };
 

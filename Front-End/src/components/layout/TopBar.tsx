@@ -37,7 +37,7 @@ const TopBar: React.FC<{ onCreateUser: () => void }> = ({ onCreateUser }) => {
   };
 
   return (
-    <div className="h-14 border-b bg-card text-card-foreground flex items-center justify-between px-3 md:px-6 shrink-0 relative z-50 shadow-sm gap-2">
+    <div className="h-14 border-b bg-card text-card-foreground hidden md:flex items-center justify-between px-3 md:px-6 shrink-0 relative z-50 shadow-sm gap-2">
       <div className="flex-1 max-w-2xl relative mx-auto group">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
