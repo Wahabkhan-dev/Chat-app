@@ -13,6 +13,7 @@ import { toast } from '@/hooks/use-toast';
 import { getSocket } from '@/services/socket';
 import { uploadFilesToR2 } from '@/services/upload';
 import { getSignedUrl } from '@/services/fileUrl';
+import { getApiBaseUrl, getToken } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 function getDmConvId(id1: string | undefined, id2: string | undefined): string {
@@ -71,22 +72,49 @@ const ForwardMessageModal: React.FC = () => {
   };
 
   const buildForwardFiles = async (messageFiles: any[], conversationId: string) => {
-    // Files that already live in R2 — pass the key directly, no re-upload needed
-    const persistedFiles = messageFiles
-      .filter((file) => file && typeof file.key === 'string' && file.key.trim())
-      .map((file) => ({ key: file.key, name: file.name, size: file.size, type: file.type, mimeType: file.mimeType }));
+    // ── WHY we always copy rather than re-use the original R2 key ──────────────
+    // Each R2 key encodes the SOURCE conversation ID (e.g. chats/dm_1_2/file.jpg).
+    // The backend's checkAccess() gate only allows members of THAT conversation to
+    // fetch the file.  If the receiver is not in the source conversation they get
+    // 403 Access Denied — the image/file simply never loads.
+    //
+    // Fix: always create a fresh copy of every file under the DESTINATION
+    // conversation's path.  Files with existing R2 keys use a lightweight
+    // server-side CopyObject call (no client download/re-upload).  Files that
+    // have only a URL are fetched once on the client and re-uploaded normally.
 
-    // Files with no R2 key must be fetched from their source URL and re-uploaded
-    const uploadCandidates = messageFiles
-      .filter((file) => file && (!file.key || !String(file.key).trim()));
+    const withKeys    = messageFiles.filter(f => f && typeof f.key === 'string' && f.key.trim());
+    const withoutKeys = messageFiles.filter(f => f && !(typeof f.key === 'string' && f.key.trim()));
 
-    if (uploadCandidates.length === 0) {
-      return persistedFiles;
+    const results: any[] = [];
+
+    // Server-side copy — efficient even for large videos/PDFs
+    if (withKeys.length > 0) {
+      const token = getToken();
+      const res = await fetch(`${getApiBaseUrl()}/files/copy`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ keys: withKeys.map(f => f.key), conversationId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as any).message || 'Failed to copy file attachments.');
+      }
+      const data = await res.json();
+      results.push(...data.files);
     }
 
-    const filesToUpload = await Promise.all(uploadCandidates.map(normalizeFile));
-    const uploaded = await uploadFilesToR2(filesToUpload, conversationId);
-    return [...persistedFiles, ...uploaded];
+    // Client-side fetch + re-upload for files that never reached R2
+    if (withoutKeys.length > 0) {
+      const filesToUpload = await Promise.all(withoutKeys.map(normalizeFile));
+      const uploaded = await uploadFilesToR2(filesToUpload, conversationId);
+      results.push(...uploaded);
+    }
+
+    return results;
   };
 
   const handleForward = async (conversationId: string, targetName: string) => {

@@ -59,6 +59,38 @@ export function getFileCategory(ext: string): string {
 
 const EVERYONE_OPTION = { id: 'everyone', name: 'everyone', department: 'Mention everyone', status: 'online' as const, avatar: undefined as string | undefined };
 
+// ── Draft persistence ──────────────────────────────────────────────────────────
+// Keyed per conversation so each chat has an independent draft.
+// We only store text + file names (File objects can't be serialised to JSON).
+interface DraftPayload { text: string; fileNames: string[] }
+
+function draftKey(convId: string) { return `draft_${convId}`; }
+
+function writeDraft(convId: string, text: string, fileNames: string[]) {
+  try {
+    if (!text.trim() && fileNames.length === 0) {
+      localStorage.removeItem(draftKey(convId));
+    } else {
+      localStorage.setItem(draftKey(convId), JSON.stringify({ text, fileNames } satisfies DraftPayload));
+    }
+  } catch {} // storage full — fail silently
+}
+
+function readDraft(convId: string): DraftPayload | null {
+  try {
+    const raw = localStorage.getItem(draftKey(convId));
+    if (!raw) return null;
+    const d = JSON.parse(raw) as DraftPayload;
+    // Do not restore purely-whitespace drafts
+    if (!d?.text?.trim()) return null;
+    return { text: d.text, fileNames: d.fileNames ?? [] };
+  } catch { return null; }
+}
+
+function deleteDraft(convId: string) {
+  try { localStorage.removeItem(draftKey(convId)); } catch {}
+}
+
 const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ onFileError }) => {
   const { state, dispatch } = useAppContext();
   const [inputText, setInputText] = useState('');
@@ -71,6 +103,13 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingMentions = useRef<{ name: string; id: string }[]>([]);
+
+  // Draft persistence refs
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevConvId = useRef<string | null>(null);
+  const inputTextRef = useRef(inputText); // always-current for use inside timers
+  inputTextRef.current = inputText;
+  const isSwitching = useRef(false); // suppress auto-save during conversation switch
 
   const activeConversation = state.activeConversation;
   const group = activeConversation?.type === 'group' ? state.groups.find(g => g.id === activeConversation.id) : null;
@@ -108,6 +147,46 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, maxH)}px`;
     }
   }, [inputText]);
+
+  // ── Conversation switch: save draft for the old chat, restore for the new one
+  useEffect(() => {
+    const newId = activeConversation?.id ?? null;
+    const oldId = prevConvId.current;
+
+    if (oldId && oldId !== newId) {
+      // Flush any pending debounce and immediately save the departing draft
+      if (draftTimer.current) clearTimeout(draftTimer.current);
+      writeDraft(oldId, inputTextRef.current, uploadedFiles.map(f => f.name));
+    }
+
+    // Block the file-change effect from firing a spurious save during reset
+    isSwitching.current = true;
+    setInputText('');
+    dispatch({ type: 'CLEAR_UPLOADED_FILES' });
+    pendingMentions.current = [];
+    setShowMentions(false);
+
+    // Restore saved draft for the incoming conversation
+    if (newId) {
+      const draft = readDraft(newId);
+      if (draft) setInputText(draft.text);
+    }
+
+    prevConvId.current = newId;
+
+    // Allow auto-save again after this render cycle completes
+    requestAnimationFrame(() => { isSwitching.current = false; });
+  }, [activeConversation?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Auto-save draft when uploaded files are added / removed
+  useEffect(() => {
+    if (!activeConversation?.id || isSwitching.current) return;
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    const convId = activeConversation.id;
+    draftTimer.current = setTimeout(() => {
+      writeDraft(convId, inputTextRef.current, uploadedFiles.map(f => f.name));
+    }, 500);
+  }, [uploadedFiles.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const processFiles = (files: FileList | File[]) => {
     const fileList = Array.from(files);
@@ -208,6 +287,10 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
 
     socket.emit('stop_typing', { conversationId: activeConversation.id });
 
+    // Clear draft immediately on send — no need to keep it anymore
+    if (activeConversation?.id) deleteDraft(activeConversation.id);
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+
     setInputText('');
     pendingMentions.current = [];
     dispatch({ type: 'SET_REPLYING_TO', payload: null });
@@ -237,6 +320,15 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
     }
 
     setInputText(value);
+
+    // ── Debounced draft save (500 ms after user pauses typing)
+    if (activeConversation?.id && !isSwitching.current) {
+      if (draftTimer.current) clearTimeout(draftTimer.current);
+      const convId = activeConversation.id;
+      draftTimer.current = setTimeout(() => {
+        writeDraft(convId, value, uploadedFiles.map(f => f.name));
+      }, 500);
+    }
 
     // Emit typing indicator
     if (activeConversation) {

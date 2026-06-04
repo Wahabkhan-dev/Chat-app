@@ -1,11 +1,21 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { generateSignedUrl, r2 } = require('../config/r2');
-const { GetObjectCommand } = require('@aws-sdk/client-s3');
+const { GetObjectCommand, CopyObjectCommand } = require('@aws-sdk/client-s3');
 const { authenticateToken } = require('../middleware/auth');
 const pool = require('../config/database');
+const { createFileMetadata } = require('../services/fileMetadataService');
+
+function formatSize(bytes) {
+  if (!bytes || bytes === 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
 
 const router = express.Router();
 
@@ -189,6 +199,65 @@ router.get('/shared', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('[files] shared error:', err.message);
     res.status(500).json({ message: 'Could not fetch shared files.' });
+  }
+});
+
+// POST /api/files/copy — server-side R2 copy for forwarded messages.
+// Creates a fresh copy of each file under the destination conversation's path so
+// the receiver can access it regardless of which conversation originally stored the file.
+router.post('/copy', authenticateToken, async (req, res) => {
+  const { keys, conversationId } = req.body;
+  if (!Array.isArray(keys) || keys.length === 0 || !conversationId) {
+    return res.status(400).json({ message: 'keys (array) and conversationId are required.' });
+  }
+  if (keys.some(k => !isValidKey(k))) {
+    return res.status(400).json({ message: 'One or more file keys are invalid.' });
+  }
+
+  const userId   = req.user.id;
+  const userRole = req.user.role;
+  const bucket   = process.env.R2_BUCKET_NAME;
+
+  try {
+    const copied = await Promise.all(keys.map(async (srcKey) => {
+      // Verify the requesting user has read access to the source file
+      await checkAccess(srcKey, userId, userRole, pool);
+
+      // Generate a new unique key under the destination conversation
+      const ext     = path.extname(srcKey).toLowerCase();
+      const newName = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}${ext}`;
+      const dstKey  = `chats/${conversationId}/${newName}`;
+
+      // Server-side copy inside R2 — no client download/upload required
+      await r2.send(new CopyObjectCommand({
+        Bucket:     bucket,
+        CopySource: `${bucket}/${srcKey}`,
+        Key:        dstKey,
+      }));
+
+      // Carry over metadata from the original file_metadata row
+      const [rows] = await pool.query(
+        'SELECT original_name, file_type, mime_type, file_size FROM file_metadata WHERE r2_key = ? LIMIT 1',
+        [srcKey]
+      );
+      const meta = rows[0];
+      const originalName = meta?.original_name || path.basename(srcKey);
+      const fileType     = meta?.file_type     || 'other';
+      const mimeType     = meta?.mime_type     || 'application/octet-stream';
+      const fileSize     = meta?.file_size     || 0;
+
+      // Create metadata for the copy (origin_message_id will be set by send_message)
+      createFileMetadata(dstKey, conversationId, userId, originalName, fileType, mimeType, fileSize)
+        .catch(err => console.error('[files/copy] metadata save failed (non-fatal):', err.message));
+
+      return { key: dstKey, name: originalName, size: formatSize(fileSize), type: fileType, mimeType };
+    }));
+
+    res.json({ files: copied });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ message: err.message });
+    console.error('[files/copy] error:', err.message || err);
+    res.status(500).json({ message: 'File copy failed.' });
   }
 });
 
