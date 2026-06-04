@@ -39,20 +39,66 @@ const AppShell: React.FC = () => {
   // Controls whether the conversation list (sidebar) is visible on mobile.
   // On desktop this state has no effect — sidebar is always shown.
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(true);
+  // True while the virtual keyboard is visible on mobile — hides bottom nav
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
 
   useSocket();
   useNotificationPermission();
   usePushNotifications();
 
-  // iOS keyboard fix: set height via JS so the keyboard never pushes content off-screen.
-  // CSS dvh/svh units are unreliable on iOS Safari when the virtual keyboard opens.
+  // iOS / Android keyboard fix using the Visual Viewport API.
+  //
+  // Problem: on iOS, window.innerHeight does NOT shrink when the software
+  // keyboard opens — only window.visualViewport.height does. The browser then
+  // auto-scrolls the document to bring the focused input into view, which
+  // pushes the conversation header off the top of the screen.
+  //
+  // Fix:
+  //  1. Listen to visualViewport resize/scroll events (falls back to window
+  //     resize on browsers without the API).
+  //  2. Pin the app div to the current visual viewport rectangle via inline
+  //     style (position fixed + top offset), so the browser scroll has no
+  //     effect on what the user sees.
+  //  3. Track whether the keyboard is open so the bottom nav can be hidden,
+  //     reclaiming those 64 px for the message list.
   useEffect(() => {
     const root = appRef.current;
     if (!root) return;
-    const setHeight = () => { root.style.height = `${window.innerHeight}px`; };
-    setHeight();
-    window.addEventListener('resize', setHeight);
-    return () => window.removeEventListener('resize', setHeight);
+
+    const apply = () => {
+      const vv = window.visualViewport;
+      const h = vv ? vv.height : window.innerHeight;
+      const top = vv ? vv.offsetTop : 0;
+
+      root.style.height = `${h}px`;
+      // Counteract the browser's auto-scroll that hides the top bar
+      root.style.position = 'fixed';
+      root.style.top = `${top}px`;
+      root.style.left = '0';
+      root.style.right = '0';
+
+      // Keyboard is open when the visible area is significantly smaller than
+      // the full window — threshold 75 % filters out URL-bar collapse changes.
+      const isKeyboard = h < window.outerHeight * 0.75;
+      setKeyboardOpen(isKeyboard);
+    };
+
+    apply();
+
+    const vv = window.visualViewport;
+    if (vv) {
+      vv.addEventListener('resize', apply);
+      vv.addEventListener('scroll', apply);
+    }
+    window.addEventListener('resize', apply);
+
+    return () => {
+      if (vv) {
+        vv.removeEventListener('resize', apply);
+        vv.removeEventListener('scroll', apply);
+      }
+      window.removeEventListener('resize', apply);
+    };
   }, []);
 
   // Prevent pinch-to-zoom and double-tap zoom on mobile (iOS ignores viewport user-scalable since iOS 10)
@@ -249,8 +295,8 @@ const AppShell: React.FC = () => {
           {renderContent()}
         </div>
 
-        {/* ── Mobile Bottom Navigation (Teams-style) ── */}
-        <div className="md:hidden flex items-center justify-around shrink-0 h-16 bg-card border-t border-border safe-bottom z-40">
+        {/* ── Mobile Bottom Navigation — hidden while keyboard is open ── */}
+        <div className={cn("md:hidden flex items-center justify-around shrink-0 h-16 bg-card border-t border-border safe-bottom z-40", keyboardOpen && "!hidden")}>
           {isAdmin ? (
             // Admins only see Admin Portal + Settings
             <>
