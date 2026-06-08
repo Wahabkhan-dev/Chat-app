@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -r \"personal.*room\\\\|user_\\\\${\" --include=\"*.js\" Back-End)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Abdul Wahab\\\\Desktop\\\\chaTAOO\\\\chatapp\\\\Mawby-teams\" -Recurse -Depth 2)",
+      "Bash(Select-Object -First 50)",
+      "Bash(ls Back-End/*.md Back-End/*.txt Back-End/*.sql Front-End/*.md)",
+      "Bash(ls *.md *.txt)",
+      "Bash(echo \"=== exit: $? ===\")",
+      "Bash(grep -rn \"messageReads\\\\|'MESSAGE_READ'\\\\|MESSAGE_READ'\" Front-End/src)",
+      "Bash(grep -rn \"get_messages_paginated\" Back-End Front-End/src)",
+      "Bash(node -e \"const t=require\\('jsonwebtoken'\\); const v=process.env.JWT_EXPIRES_IN; console.log\\('JWT_EXPIRES_IN =', JSON.stringify\\(v\\)\\); try { const tok=t.sign\\({id:1},'x',v?{expiresIn:v}:{}\\); const d=t.decode\\(tok\\); console.log\\('decoded.exp =', d.exp, '=> expires_at =', new Date\\(\\(d.exp||NaN\\)*1000\\).toString\\(\\)\\); } catch\\(e\\){ console.log\\('SIGN ERROR:', e.message\\); }\")",
+      "Read(//c/Users/Abdul Wahab/Desktop/chaTAOO/chatapp/Mawby-teams/Back-End/CREATE TABLE.*user_sessions/**)",
+      "Bash(grep -niB2 -A1 \"expires_at\\\\|expiresAt\" prisma/schema.prisma)",
+      "Bash(node --check services/sessionService.js)",
+      "Bash(node -e \"process.env.JWT_SECRET='x'; const s=require\\('./services/sessionService'\\); console.log\\('module loads OK'\\);\")"
+    ]
+  }
+}

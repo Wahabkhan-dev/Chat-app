@@ -185,13 +185,24 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
     });
   }, [activeConversation?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Auto-save draft when uploaded files are added / removed
+  // ── Auto-save draft when uploaded files are added / removed and sync to other devices
   useEffect(() => {
     if (!activeConversation?.id || isSwitching.current) return;
     if (draftTimer.current) clearTimeout(draftTimer.current);
     const convId = activeConversation.id;
     draftTimer.current = setTimeout(() => {
-      writeDraft(convId, inputTextRef.current, uploadedFiles.map(f => f.name));
+      const fileNames = uploadedFiles.map(f => f.name);
+      writeDraft(convId, inputTextRef.current, fileNames);
+
+      // PHASE 5: Broadcast draft to other devices of this user via socket
+      const socket = getSocket();
+      if (socket?.connected && (inputTextRef.current.trim() || fileNames.length > 0)) {
+        socket.emit('save_draft', {
+          conversationId: convId,
+          content: inputTextRef.current,
+          fileNames,
+        });
+      }
     }, 500);
   }, [uploadedFiles.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -295,7 +306,11 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
     socket.emit('stop_typing', { conversationId: activeConversation.id });
 
     // Clear draft immediately on send — no need to keep it anymore
-    if (activeConversation?.id) deleteDraft(activeConversation.id);
+    if (activeConversation?.id) {
+      deleteDraft(activeConversation.id);
+      // PHASE 5: Broadcast draft clear to other devices of this user
+      socket.emit('clear_draft', { conversationId: activeConversation.id });
+    }
     if (draftTimer.current) clearTimeout(draftTimer.current);
 
     setInputText('');
@@ -328,12 +343,23 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
 
     setInputText(value);
 
-    // ── Debounced draft save (500 ms after user pauses typing)
+    // ── Debounced draft save (500 ms after user pauses typing) and sync to other devices
     if (activeConversation?.id && !isSwitching.current) {
       if (draftTimer.current) clearTimeout(draftTimer.current);
       const convId = activeConversation.id;
       draftTimer.current = setTimeout(() => {
-        writeDraft(convId, value, uploadedFiles.map(f => f.name));
+        const fileNames = uploadedFiles.map(f => f.name);
+        writeDraft(convId, value, fileNames);
+
+        // PHASE 5: Broadcast draft to other devices of this user via socket
+        const socket = getSocket();
+        if (socket?.connected && (value.trim() || fileNames.length > 0)) {
+          socket.emit('save_draft', {
+            conversationId: convId,
+            content: value,
+            fileNames,
+          });
+        }
       }, 500);
     }
 

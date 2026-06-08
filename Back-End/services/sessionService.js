@@ -13,13 +13,25 @@ function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
+// MySQL TIMESTAMP columns cannot store dates beyond 2038-01-19 03:14:07 UTC.
+// A long-lived JWT (e.g. JWT_EXPIRES_IN=999y → year 3025) overflows the column, so
+// MySQL stores 0000-00-00 (or rejects the insert). That made every session instantly
+// fail the `expires_at > NOW()` check and logged ALL users out. Clamp any expiry to a
+// safe in-range value so sessions persist as long as the column allows.
+const MYSQL_TIMESTAMP_MAX = new Date('2038-01-19T00:00:00Z');
+function toSafeExpiry(expSeconds) {
+  const date = expSeconds ? new Date(expSeconds * 1000) : MYSQL_TIMESTAMP_MAX;
+  if (Number.isNaN(date.getTime()) || date > MYSQL_TIMESTAMP_MAX) return MYSQL_TIMESTAMP_MAX;
+  return date;
+}
+
 /**
  * Create a new session in the database
  */
 async function createSession(userId, token, deviceInfo = null) {
   const tokenHash = hashToken(token);
   const decoded = jwt.decode(token);
-  const expiresAt = new Date(decoded.exp * 1000);
+  const expiresAt = toSafeExpiry(decoded?.exp); // clamp to MySQL TIMESTAMP range
 
   // Extract device info from user agent
   const userAgent = deviceInfo?.userAgent || '';
@@ -133,7 +145,7 @@ async function invalidateAllUserSessions(userId) {
 async function blacklistToken(token) {
   const tokenHash = hashToken(token);
   const decoded = jwt.decode(token);
-  const expiresAt = new Date(decoded.exp * 1000);
+  const expiresAt = toSafeExpiry(decoded?.exp); // clamp to MySQL TIMESTAMP range
   const userId = decoded.id;
 
   try {

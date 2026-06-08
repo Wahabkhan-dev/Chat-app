@@ -17,6 +17,7 @@ export function useSocket() {
   // Dedup processed message IDs — prevents double-delivery from room + personal room
   const processedMsgIds = useRef(new Set<string>());
   const loadedOnce = useRef(false); // true after first loadData() completes
+  const lastSyncAt = useRef(0); // throttle syncMissedMessages against reconnect/focus churn
 
   useEffect(() => {
     if (!state.isAuthenticated || initialized.current) return;
@@ -29,6 +30,13 @@ export function useSocket() {
     // Fetch unread counts for conversations that received messages while socket was down.
     // Called both after initial load and on every reconnect so the sidebar badges stay accurate.
     const syncMissedMessages = async () => {
+      // Throttle: socket 'connect' (reconnects) and tab-focus both call this. With multiple
+      // tabs of the same user, unthrottled calls storm /messages/unread-since and trip the
+      // 30 req/min messages rate limiter (429). At most once every 15s is plenty — real-time
+      // delivery still happens via the new_message socket event regardless.
+      const nowTs = Date.now();
+      if (nowTs - lastSyncAt.current < 15000) return;
+      lastSyncAt.current = nowTs;
       try {
         const uid = stateRef.current.currentUser?.id;
         const stored = uid ? localStorage.getItem(`cmeta_${uid}`) : null;
@@ -336,6 +344,17 @@ export function useSocket() {
 
     socket.on('user_status_change', ({ userId, status }) => {
       dispatch({ type: 'UPDATE_USER_STATUS', payload: { userId: String(userId), status } });
+    });
+
+    // PHASE 2: Listen for device connection on other devices
+    socket.on('device_status_change', ({ userId, action }) => {
+      if (action === 'device_connected') {
+        // Another device of this user logged in — update status to online
+        dispatch({
+          type: 'UPDATE_USER_STATUS',
+          payload: { userId: String(userId), status: 'online' },
+        });
+      }
     });
 
     socket.on('user_updated', ({ user }) => {
@@ -769,35 +788,54 @@ export function useSocket() {
 
     socket.on('conversation_read', ({ conversationId, userId, readUntilMessageId, readAt }) => {
       const s = stateRef.current;
-      if (userId === s.currentUser?.id) return;
-      if (!readUntilMessageId) return;
+      if (!conversationId) return;
 
-      const numericCutoff = Number(readUntilMessageId);
-      if (Number.isNaN(numericCutoff)) return;
+      // Case A: WE read this conversation on another device. Clear the unread badge here
+      // so reading on one device clears it everywhere in real time.
+      if (userId === s.currentUser?.id) {
+        dispatch({ type: 'CONVERSATION_READ', payload: { conversationId, userId: String(userId) } });
+        return;
+      }
 
+      // Case B: the OTHER participant read our messages — update read receipts to "seen".
       const messages = s.messages?.[conversationId] || [];
+      const numericCutoff = readUntilMessageId != null ? Number(readUntilMessageId) : NaN;
       messages.forEach((message) => {
         if (message.senderId !== s.currentUser?.id) return;
-        const messageIdNum = Number(message.id);
-        if (Number.isNaN(messageIdNum) || messageIdNum > numericCutoff) return;
         if (message.status === 'seen') return;
+        // If a cutoff was provided, only mark messages up to that point; otherwise mark all.
+        if (!Number.isNaN(numericCutoff)) {
+          const messageIdNum = Number(message.id);
+          if (Number.isNaN(messageIdNum) || messageIdNum > numericCutoff) return;
+        }
         dispatch({ type: 'SET_MESSAGE_STATUS', payload: { conversationId, messageId: message.id, status: 'seen' } });
       });
     });
 
     // Handle pinned messages
-    socket.on('message_pinned', ({ conversationId, message }) => {
+    // removed: duplicate message_pinned/message_unpinned listeners — the originals above
+    // (with the blocked-conversation guard) already handle these; the duplicates caused
+    // PIN_MESSAGE/UNPIN_MESSAGE to dispatch twice and bypassed the blocked guard.
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // PHASE 5: Cross-Device Draft Sync Listeners
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    // Another device of this user updated a draft — sync to current device
+    socket.on('draft_updated', ({ conversationId, content, fileNames, timestamp }) => {
+      const s = stateRef.current;
+      const userId = s.currentUser?.id;
+      // Only sync drafts from other devices (not self)
+      // This listener receives broadcasts to user_${userId}
       dispatch({
-        type: 'PIN_MESSAGE',
-        payload: { conversationId, message },
+        type: 'UPDATE_DRAFT',
+        payload: { conversationId, content, fileNames: fileNames || [] },
       });
     });
 
-    socket.on('message_unpinned', ({ conversationId }) => {
-      dispatch({
-        type: 'UNPIN_MESSAGE',
-        payload: conversationId,
-      });
+    // Another device of this user cleared a draft
+    socket.on('draft_cleared', ({ conversationId, userId }) => {
+      dispatch({ type: 'CLEAR_DRAFT', payload: conversationId });
     });
 
     // Heartbeat: mobile OS can suspend the socket when the app is backgrounded.
@@ -810,12 +848,16 @@ export function useSocket() {
 
     // Foreground: when the user switches back to the app, reconnect immediately
     // rather than waiting for the next heartbeat tick.
-    const handleVisibility = () => {
+    const handleVisibility = async () => {
       if (document.visibilityState !== 'visible') return;
       const sock = getSocket();
       if (!sock?.connected && stateRef.current.isAuthenticated) {
         sock?.connect();
       } else if (sock?.connected && loadedOnce.current) {
+        // removed: per-focus /users/directory fetch — online status already syncs via the
+        // user_status_change / device_status_change socket events. Fetching the whole
+        // directory on every tab focus multiplied requests across tabs and tripped the
+        // 100 req/min rate limiter (429). syncMissedMessages is one batched call, kept.
         syncMissedMessages();
       }
     };

@@ -172,6 +172,9 @@ interface AppState {
     mediaView: 'grid' | 'list';
     filesSort: 'newest' | 'largest' | 'nameAZ';
   };
+  // removed: messageReads — was written but never read
+  // PHASE 5: Draft state per conversation
+  drafts: Record<string, { content: string; fileNames: string[] }>; // Record<conversationId, draft>
 }
 
 type AppAction =
@@ -219,6 +222,7 @@ type AppAction =
   | { type: 'MARK_NOTIFICATIONS_READ' }
   | { type: 'MARK_NOTIFICATION_READ'; payload: string }
   | { type: 'MARK_NOTIFICATIONS_READ_BY_IDS'; payload: string[] }
+  | { type: 'MARK_CONVERSATION_NOTIFICATIONS_READ'; payload: string }
   | { type: 'PUSH_IN_APP_NOTIFICATION'; payload: InAppNotification }
   | { type: 'DISMISS_IN_APP_NOTIFICATION'; payload: string }
   | { type: 'OPEN_MODAL'; payload: { type: ModalType; data?: any } }
@@ -237,6 +241,11 @@ type AppAction =
   | { type: 'DEMOTE_FROM_ADMIN'; payload: { groupId: string; userId: string; systemMessage?: Message } }
   | { type: 'TRANSFER_ADMIN_AND_LEAVE'; payload: { groupId: string; leavingUserId: string; newAdminId: string; systemMessages: Message[] } }
   | { type: 'TRANSFER_OWNERSHIP'; payload: { groupId: string; oldOwnerId: string; newOwnerId: string; systemMessage: Message } }
+  // PHASE 3: Read status actions
+  | { type: 'CONVERSATION_READ'; payload: { conversationId: string; userId: string } }
+  // PHASE 5: Draft actions
+  | { type: 'UPDATE_DRAFT'; payload: { conversationId: string; content: string; fileNames: string[] } }
+  | { type: 'CLEAR_DRAFT'; payload: string }
   | { type: 'OPEN_GALLERY'; payload: { items: MessageFile[]; index: number } }
   | { type: 'CLOSE_GALLERY' }
   | { type: 'NAVIGATE_GALLERY'; payload: number }
@@ -291,7 +300,8 @@ const initialState: AppState = {
     activeTab: 'about',
     mediaView: 'grid',
     filesSort: 'newest'
-  }
+  },
+  drafts: {},
 };
 
 const appReducer = (state: AppState, action: AppAction): AppState => {
@@ -755,7 +765,11 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         activeConversation: resolvedPayload,
         activeView: resolvedPayload ? 'chat' : state.activeView,
         conversationMeta: convId ? { ...state.conversationMeta, [convId]: newMeta! } : state.conversationMeta,
-        chatUI: { ...state.chatUI, isSearchActive: false, searchQuery: '', uploadedFiles: [], isUploading: false }
+        chatUI: { ...state.chatUI, isSearchActive: false, searchQuery: '', uploadedFiles: [], isUploading: false },
+        // A pending reply/forward belongs to the conversation it was started in —
+        // clear it on switch so it can never attach to a message in another conversation.
+        replyingTo: null,
+        forwardingMessage: null,
       };
     }
     case 'PIN_CONVERSATION':
@@ -860,6 +874,13 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
       return {
         ...state,
         notifications: state.notifications.filter((n) => !action.payload.includes(n.id)),
+      };
+    case 'MARK_CONVERSATION_NOTIFICATIONS_READ':
+      // Remove every bell notification tied to this conversation (message, mention, reaction…).
+      // Used when the user opens a conversation so the bell clears immediately on this device.
+      return {
+        ...state,
+        notifications: state.notifications.filter((n) => n.conversationId !== action.payload),
       };
     case 'OPEN_MODAL':
       return { ...state, activeModal: action.payload.type, modalData: action.payload.data };
@@ -1095,6 +1116,51 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         ...state,
         inAppNotifications: state.inAppNotifications.filter(n => n.id !== action.payload),
       };
+    // removed: MESSAGE_READ case — wrote to state.messageReads, which no component ever read
+    case 'CONVERSATION_READ': {
+      // We (this user) read this conversation on another device. Clear the unread badge
+      // AND advance lastReadAt — otherwise on the next refresh/reconnect syncMissedMessages
+      // would re-count these already-read messages and the badge/notification would come back.
+      const { conversationId, userId } = action.payload;
+      if (userId === state.currentUser?.id) {
+        return {
+          ...state,
+          conversationMeta: {
+            ...state.conversationMeta,
+            [conversationId]: {
+              ...(state.conversationMeta[conversationId] || { muted: false, pinned: false, unreadCount: 0, hasUnreadMention: false }),
+              unreadCount: 0,
+              hasUnreadMention: false,
+              isManuallyUnread: false,
+              lastReadAt: new Date().toISOString(),
+            },
+          },
+          // Also drop any bell notifications for this conversation so the observing device
+          // matches the device that did the reading.
+          notifications: state.notifications.filter((n) => n.conversationId !== conversationId),
+        };
+      }
+      return state;
+    }
+    // PHASE 5: Draft management
+    case 'UPDATE_DRAFT': {
+      const { conversationId, content, fileNames } = action.payload;
+      return {
+        ...state,
+        drafts: {
+          ...state.drafts,
+          [conversationId]: { content, fileNames },
+        },
+      };
+    }
+    case 'CLEAR_DRAFT': {
+      const conversationId = action.payload;
+      const { [conversationId]: _, ...rest } = state.drafts;
+      return {
+        ...state,
+        drafts: rest,
+      };
+    }
     default:
       return state;
   }

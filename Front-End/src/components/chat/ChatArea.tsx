@@ -6,6 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/lib/api';
 import { getSocket } from '@/services/socket';
+import { markConversationNotificationsRead } from '@/services/notifications';
 import { Search, Info, X, ChevronDown, VolumeX, Lock, Pin, ArrowLeft, Loader2 } from 'lucide-react';
 import { Avatar } from '../ui/avatar';
 import MessageBubble from './MessageBubble';
@@ -43,11 +44,13 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const [showScrollPill, setShowScrollPill] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const uploadErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   // Tracks which conversations have been fully fetched from the API this session.
   // Using state.messages as the guard was wrong: socket-delivered messages populate
   // state.messages[convId] before the user opens the chat, causing the full history
   // fetch to be skipped and the user to see only the most recent socket message.
   const apiLoadedConversations = useRef(new Set<string>());
+  const initialScrollApplied = useRef(new Set<string>());
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
@@ -62,11 +65,20 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   useEffect(() => {
     if (!activeConversationId) return;
     dispatch({ type: 'MARK_CONVERSATION_READ', payload: activeConversationId });
+    // Instantly clear bell notifications for this conversation on THIS device…
+    dispatch({ type: 'MARK_CONVERSATION_NOTIFICATIONS_READ', payload: activeConversationId });
+    // …and tell the server to mark them read so (a) other devices clear in real time
+    // via the conversation_notifications_read broadcast, and (b) they don't come back
+    // as phantom notifications on the next refresh/reconnect.
+    markConversationNotificationsRead(activeConversationId);
   }, [activeConversationId]);
 
   // Load message history + join socket room whenever conversation changes
   useEffect(() => {
     if (!activeConversationId) return;
+
+    // Reset scroll tracking for new conversation
+    initialScrollApplied.current.delete(activeConversationId);
 
     const socket = getSocket();
     if (socket) {
@@ -81,9 +93,14 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     // We deliberately do NOT gate on state.messages here — socket messages can pre-populate
     // state.messages[convId] before the conversation is opened, so that check was causing
     // the full history to be skipped and only the latest socket message to be shown.
-    if (apiLoadedConversations.current.has(activeConversationId)) return;
+    if (apiLoadedConversations.current.has(activeConversationId)) {
+      setIsLoadingMessages(false);
+      return;
+    }
+
     // Mark as in-flight immediately to prevent double-fetch on fast tab switches
     apiLoadedConversations.current.add(activeConversationId);
+    setIsLoadingMessages(true);
 
     api.get<{ messages: any[] }>(`/messages/${activeConversationId}`)
       .then(({ messages }) => {
@@ -92,10 +109,12 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         if (pinned) {
           dispatch({ type: 'PIN_MESSAGE', payload: { conversationId: activeConversationId, message: pinned } });
         }
+        setIsLoadingMessages(false);
       })
       .catch((error) => {
         // Allow retry on next open if the fetch failed
         apiLoadedConversations.current.delete(activeConversationId);
+        setIsLoadingMessages(false);
         console.error(`[ChatArea] failed to load messages for ${activeConversationId}:`, error);
       });
   }, [activeConversationId]);
@@ -168,11 +187,35 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     return parts.length >= 3 && parts[1] === parts[2];
   }, [state.activeConversation]);
 
+  // Apply scroll to bottom ONCE when conversation opens with messages loaded
+  // This prevents the visual jump/flicker on first render
   useEffect(() => {
-    if (scrollRef.current && !state.chatUI.isSearchActive) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (!activeConversationId || !scrollRef.current) return;
+
+    // Only scroll once per conversation
+    if (initialScrollApplied.current.has(activeConversationId)) return;
+
+    // Only scroll if messages are loaded
+    if (rawMessages.length === 0) return;
+
+    // Mark as applied before scroll (prevent multiple triggers)
+    initialScrollApplied.current.add(activeConversationId);
+
+    // Use requestAnimationFrame to ensure scroll happens after DOM is ready
+    requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    });
+  }, [activeConversationId, rawMessages.length]);
+
+  // Handle manual scroll to bottom when user clicks scroll pill
+  // (separate from initial load scroll)
+  const scrollToBottom = () => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }
-  }, [rawMessages.length, activeConversationId, state.chatUI.isSearchActive]);
+  };
 
   // If URL contains ?focusMessageId=..., try to scroll to it (persistent navigation)
   useEffect(() => {
@@ -453,14 +496,21 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         ref={scrollRef}
         onScroll={handleScroll}
       >
-        {filteredMessages.length === 0 && (
+        {isLoadingMessages && (
+          <div className="flex flex-col items-center justify-center py-20">
+            <Loader2 className="h-8 w-8 mb-4 text-primary animate-spin" />
+            <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Loading messages…</p>
+          </div>
+        )}
+
+        {!isLoadingMessages && filteredMessages.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 opacity-30">
             <Search className="h-12 w-12 mb-4" />
             <p className="text-sm font-bold uppercase tracking-widest">No messages found</p>
           </div>
         )}
-        
-        {filteredMessages.map((msg, idx) => {
+
+        {!isLoadingMessages && filteredMessages.map((msg, idx) => {
           const prevMsg = filteredMessages[idx - 1];
           const showDivider = !prevMsg || format(new Date(msg.timestamp), 'yyyy-MM-dd') !== format(new Date(prevMsg.timestamp), 'yyyy-MM-dd');
           const isGrouped = prevMsg && prevMsg.senderId === msg.senderId && 
@@ -504,7 +554,7 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
       {/* Scroll Pill */}
       {showScrollPill && (
         <button
-          onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })}
+          onClick={scrollToBottom}
           className="absolute bottom-24 right-4 md:right-8 bg-primary text-white p-2.5 rounded-full shadow-2xl hover:scale-110 transition-all z-30 animate-in bounce-in"
         >
           <ChevronDown className="h-5 w-5" />

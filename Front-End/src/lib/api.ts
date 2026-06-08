@@ -36,25 +36,42 @@ async function request<T>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
-    ...options,
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${endpoint}`, {
+      ...options,
+      headers,
+    });
+  } catch (networkErr) {
+    // fetch rejects on network failure / CORS / server unreachable — surface a clear,
+    // non-crashing error instead of an opaque "Something went wrong" from a later parse.
+    throw new Error('Network error — could not reach the server. Check your connection.');
+  }
 
-  const data = await res.json();
+  // Parse the body defensively: a 5xx/gateway error or empty body may not be JSON,
+  // and calling res.json() on it would throw a confusing SyntaxError that crashes the UI.
+  const rawText = await res.text();
+  let data: any = null;
+  if (rawText) {
+    try { data = JSON.parse(rawText); } catch { data = { message: rawText }; }
+  }
+
+  // Error messages may live at data.message OR data.error.message (the rate limiter
+  // nests it under `error`). Check both so the real reason surfaces, not a generic one.
+  const errMessage = data?.message || data?.error?.message;
 
   // 401 / 403 both mean the session is no longer valid — clear the token so
   // the auth layer can redirect to login cleanly instead of looping on errors.
   if (res.status === 401 || res.status === 403) {
     clearToken();
-    throw new Error(data.message || 'Session expired. Please login again.');
+    throw new Error(errMessage || 'Session expired. Please login again.');
   }
 
   if (!res.ok) {
-    throw new Error(data.message || 'Something went wrong.');
+    throw new Error(errMessage || `Request failed (${res.status} ${res.statusText}).`);
   }
 
-  return data;
+  return data as T;
 }
 
 export const api = {

@@ -108,7 +108,7 @@ app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
 // Global rate limiters for different endpoint categories
 const generalLimiter = new RateLimiter('general', 100, 60000).middleware();
-const messageLimiter = new RateLimiter('messages', 30, 60000).middleware();
+const messageLimiter = new RateLimiter('messages', 60, 60000).middleware(); // history/unread reads (sending is socket-rate-limited separately)
 const notificationLimiter = new RateLimiter('notifications', 50, 60000).middleware();
 const uploadLimiter = new RateLimiter('uploads', 10, 60000).middleware();
 
