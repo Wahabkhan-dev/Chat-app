@@ -13,7 +13,9 @@
       "Read(//c/Users/Abdul Wahab/Desktop/chaTAOO/chatapp/Mawby-teams/Back-End/CREATE TABLE.*user_sessions/**)",
       "Bash(grep -niB2 -A1 \"expires_at\\\\|expiresAt\" prisma/schema.prisma)",
       "Bash(node --check services/sessionService.js)",
-      "Bash(node -e \"process.env.JWT_SECRET='x'; const s=require\\('./services/sessionService'\\); console.log\\('module loads OK'\\);\")"
+      "Bash(node -e \"process.env.JWT_SECRET='x'; const s=require\\('./services/sessionService'\\); console.log\\('module loads OK'\\);\")",
+      "Bash(grep -rln \"getConversationList\\\\|async function getConversationList\\\\|getConversationList =\" services models)",
+      "Bash(grep -rln \"unread-since\\\\|unread/counts\\\\|unreadSince\\\\|getUnreadCounts\" routes services models)"
     ]
   }
 }

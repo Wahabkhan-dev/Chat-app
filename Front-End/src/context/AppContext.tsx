@@ -399,7 +399,11 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
             lastReadAt: latestMsg ? latestMsg.timestamp : new Date().toISOString(),
             ...(latestMsg ? {
               lastMessage: {
-                content: (latestMsg.content || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1'),
+                // Respect soft-deletes — a deleted last message must show the placeholder in the
+                // sidebar, not leak its original text back in when the chat is opened.
+                content: latestMsg.isDeleted
+                  ? 'This message was deleted'
+                  : (latestMsg.content || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1'),
                 senderId: latestMsg.senderId,
                 timestamp: latestMsg.timestamp,
               },
@@ -672,33 +676,68 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         chatUI: { ...state.chatUI, editingMessageId: null }
       };
     case 'DELETE_MESSAGE': {
-      const existing = state.messages[action.payload.conversationId];
+      const { conversationId: delConvId, messageId: delMsgId } = action.payload;
+      const existing = state.messages[delConvId];
       // If this conversation hasn't been loaded yet, skip — when it loads from DB it will already be deleted
       if (!existing) return state;
+      const updatedList = existing.map(m =>
+        m.id === delMsgId
+          ? { ...m, isDeleted: true, deletedBy: action.payload.deletedBy, deletedAt: action.payload.deletedAt }
+          : m
+      );
+
+      // If the deleted message was the conversation's latest message, the sidebar preview
+      // (conversationMeta.lastMessage) would otherwise keep showing the old text. Update it
+      // to match the chat view ("This message was deleted").
+      const delMeta = state.conversationMeta[delConvId];
+      const latest = updatedList[updatedList.length - 1];
+      const updatedConversationMeta = (delMeta?.lastMessage && latest?.id === delMsgId)
+        ? {
+            ...state.conversationMeta,
+            [delConvId]: {
+              ...delMeta,
+              lastMessage: { ...delMeta.lastMessage, content: 'This message was deleted' },
+            },
+          }
+        : state.conversationMeta;
+
       return {
         ...state,
-        messages: {
-          ...state.messages,
-          [action.payload.conversationId]: existing.map(m =>
-            m.id === action.payload.messageId
-              ? { ...m, isDeleted: true, deletedBy: action.payload.deletedBy, deletedAt: action.payload.deletedAt }
-              : m
-          ),
-        },
+        messages: { ...state.messages, [delConvId]: updatedList },
+        conversationMeta: updatedConversationMeta,
       };
     }
-    case 'UNDO_DELETE':
+    case 'UNDO_DELETE': {
+      const { conversationId: undoConvId, messageId: undoMsgId } = action.payload;
+      const undoList = (state.messages[undoConvId] || []).map(m =>
+        m.id === undoMsgId
+          ? { ...m, isDeleted: false, deletedAt: undefined, deletedBy: undefined }
+          : m
+      );
+
+      // Mirror of DELETE_MESSAGE: if the restored message is the latest, put its real
+      // content back into the sidebar preview (we replaced it with the deleted placeholder).
+      const undoMeta = state.conversationMeta[undoConvId];
+      const undoLatest = undoList[undoList.length - 1];
+      const restoredConversationMeta = (undoMeta?.lastMessage && undoLatest?.id === undoMsgId)
+        ? {
+            ...state.conversationMeta,
+            [undoConvId]: {
+              ...undoMeta,
+              lastMessage: {
+                ...undoMeta.lastMessage,
+                content: (undoLatest.content || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1'),
+              },
+            },
+          }
+        : state.conversationMeta;
+
       return {
         ...state,
-        messages: {
-          ...state.messages,
-          [action.payload.conversationId]: (state.messages[action.payload.conversationId] || []).map(m =>
-            m.id === action.payload.messageId
-              ? { ...m, isDeleted: false, deletedAt: undefined, deletedBy: undefined }
-              : m
-          )
-        }
+        messages: { ...state.messages, [undoConvId]: undoList },
+        conversationMeta: restoredConversationMeta,
       };
+    }
     case 'PIN_MESSAGE':
       return {
         ...state,
@@ -982,7 +1021,10 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         ...state,
         conversationMeta: {
           ...state.conversationMeta,
-          [action.payload]: { ...(state.conversationMeta[action.payload] || { muted: false, pinned: false }), unreadCount: 0, hasUnreadMention: false, isManuallyUnread: false }
+          // lastReadAt MUST advance here. syncMissedMessages re-counts unread since lastReadAt;
+          // if we clear the badge without moving lastReadAt, the next sync re-counts the same
+          // messages and the notification/unread badge reappears.
+          [action.payload]: { ...(state.conversationMeta[action.payload] || { muted: false, pinned: false }), unreadCount: 0, hasUnreadMention: false, isManuallyUnread: false, lastReadAt: new Date().toISOString() }
         }
       };
     case 'MARK_CONVERSATION_UNREAD':

@@ -45,12 +45,21 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const uploadErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  // True once the conversation has been scrolled to its last message. The loading overlay stays
+  // up until this flips, so the user never sees messages render from the top and then jump.
+  const [scrollReady, setScrollReady] = useState(false);
   // Tracks which conversations have been fully fetched from the API this session.
   // Using state.messages as the guard was wrong: socket-delivered messages populate
   // state.messages[convId] before the user opens the chat, causing the full history
   // fetch to be skipped and the user to see only the most recent socket message.
   const apiLoadedConversations = useRef(new Set<string>());
   const initialScrollApplied = useRef(new Set<string>());
+  // Auto-scroll-on-new-message tracking. isAtBottomRef reflects whether the user was pinned
+  // near the bottom (updated on scroll). prevLastIdRef/prevConvIdRef detect a genuinely NEW
+  // newest message (vs older-history pagination, edits, or a conversation switch).
+  const isAtBottomRef = useRef(true);
+  const prevConvIdRef = useRef<string | null>(null);
+  const prevLastIdRef = useRef<string | number | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
@@ -64,6 +73,15 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   // handles the server-side persistence and syncs other devices.
   useEffect(() => {
     if (!activeConversationId) return;
+    // Only treat the conversation as "read" when the user is actually looking at this device
+    // (window visible AND focused). Otherwise a background device — e.g. the laptop left open
+    // while you're on your phone — would auto-clear notifications across all your devices just
+    // because the app is logged in there. If not focused, we leave it for the focus listener.
+    const isViewing = typeof document !== 'undefined'
+      && document.visibilityState === 'visible'
+      && (typeof document.hasFocus !== 'function' || document.hasFocus());
+    if (!isViewing) return;
+
     dispatch({ type: 'MARK_CONVERSATION_READ', payload: activeConversationId });
     // Instantly clear bell notifications for this conversation on THIS device…
     dispatch({ type: 'MARK_CONVERSATION_NOTIFICATIONS_READ', payload: activeConversationId });
@@ -79,6 +97,8 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
 
     // Reset scroll tracking for new conversation
     initialScrollApplied.current.delete(activeConversationId);
+    // Hide messages behind the loader until this conversation is scrolled to its last message.
+    setScrollReady(false);
 
     const socket = getSocket();
     if (socket) {
@@ -122,6 +142,11 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const emitReadStatus = () => {
     if (!activeConversationId || !state.currentUser?.id) return;
     if (typeof document === 'undefined' || document.visibilityState !== 'visible') return;
+    // Only mark read when the user is ACTUALLY looking at this window. visibilityState is
+    // 'visible' even for a background browser window (e.g. laptop open while you read on your
+    // phone) — that was auto-reading messages and clearing notifications on your other devices.
+    // document.hasFocus() is true only when this window/tab is the focused one.
+    if (typeof document.hasFocus === 'function' && !document.hasFocus()) return;
 
     const socket = getSocket();
     if (!socket?.connected) return;
@@ -151,13 +176,25 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   useEffect(() => {
     if (typeof document === 'undefined') return;
 
-    const handleVisibilityChange = () => {
+    // When the user actually returns to / focuses this window with a conversation open,
+    // mark it read NOW (server + cross-device clear). This is what makes a conversation that
+    // was opened in an unfocused/background window get read once the user looks at it.
+    const handleViewed = () => {
+      if (!activeConversationId) return;
       if (document.visibilityState !== 'visible') return;
+      if (typeof document.hasFocus === 'function' && !document.hasFocus()) return;
+      dispatch({ type: 'MARK_CONVERSATION_READ', payload: activeConversationId });
+      dispatch({ type: 'MARK_CONVERSATION_NOTIFICATIONS_READ', payload: activeConversationId });
+      markConversationNotificationsRead(activeConversationId);
       emitReadStatus();
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('visibilitychange', handleViewed);
+    window.addEventListener('focus', handleViewed);
+    return () => {
+      document.removeEventListener('visibilitychange', handleViewed);
+      window.removeEventListener('focus', handleViewed);
+    };
   }, [activeConversationId, rawMessages.length, state.currentUser?.id]);
 
   const filteredMessages = useMemo(() => {
@@ -201,11 +238,14 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     // Mark as applied before scroll (prevent multiple triggers)
     initialScrollApplied.current.add(activeConversationId);
 
-    // Use requestAnimationFrame to ensure scroll happens after DOM is ready
+    // Use requestAnimationFrame to ensure scroll happens after DOM is ready. Once we've pinned
+    // to the bottom, reveal the messages (drop the loading overlay) — the last message is now
+    // in view, so there's no top-to-bottom jump.
     requestAnimationFrame(() => {
       if (scrollRef.current) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       }
+      setScrollReady(true);
     });
   }, [activeConversationId, rawMessages.length]);
 
@@ -251,8 +291,39 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     if (!scrollRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
     const isAtBottom = scrollHeight - scrollTop - clientHeight < 150;
+    isAtBottomRef.current = isAtBottom;
     setShowScrollPill(!isAtBottom);
   };
+
+  // Auto-scroll a newly-arrived message into view. Fires only when the NEWEST message changes
+  // (so older-history pagination / edits don't trigger it), and only when the user is already
+  // near the bottom OR the message is their own — otherwise we leave their scroll position
+  // alone (they're reading history) and the scroll pill signals there's new content below.
+  useEffect(() => {
+    if (!activeConversationId || !scrollRef.current) return;
+    const lastMsg = rawMessages[rawMessages.length - 1];
+    const lastId = lastMsg?.id ?? null;
+
+    // Conversation switch: just record state; the initial-scroll effect handles first paint.
+    if (prevConvIdRef.current !== activeConversationId) {
+      prevConvIdRef.current = activeConversationId;
+      prevLastIdRef.current = lastId;
+      isAtBottomRef.current = true;
+      return;
+    }
+    // Newest message unchanged (pagination / edit / delete) — do nothing.
+    if (lastId === null || lastId === prevLastIdRef.current) return;
+    prevLastIdRef.current = lastId;
+
+    const isMine = String(lastMsg?.senderId) === String(state.currentUser?.id);
+    if (isAtBottomRef.current || isMine) {
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+        }
+      });
+    }
+  }, [activeConversationId, rawMessages.length, state.currentUser?.id]);
 
   const showUploadError = (message: string) => {
     setUploadError(message);
@@ -491,17 +562,12 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
       )}
 
       {/* Messages */}
+      <div className="flex-1 flex flex-col min-h-0 relative">
       <div
         className="flex-1 overflow-y-auto overflow-x-hidden p-3 md:p-6 scrollbar-chat scroll-smooth relative touch-scroll"
         ref={scrollRef}
         onScroll={handleScroll}
       >
-        {isLoadingMessages && (
-          <div className="flex flex-col items-center justify-center py-20">
-            <Loader2 className="h-8 w-8 mb-4 text-primary animate-spin" />
-            <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Loading messages…</p>
-          </div>
-        )}
 
         {!isLoadingMessages && filteredMessages.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 opacity-30">
@@ -547,6 +613,16 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                 <div className="h-1 w-1 bg-muted-foreground rounded-full animate-bounce [animation-delay:0.4s]" />
               </div>
             </div>
+          </div>
+        )}
+      </div>
+
+        {/* Loading overlay — stays up until the conversation is scrolled to its last message,
+            so the user never sees messages render from the top and then jump to the bottom. */}
+        {(isLoadingMessages || (!scrollReady && filteredMessages.length > 0)) && (
+          <div className="absolute inset-0 z-20 bg-background flex flex-col items-center justify-center">
+            <Loader2 className="h-8 w-8 mb-4 text-primary animate-spin" />
+            <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Loading conversation…</p>
           </div>
         )}
       </div>

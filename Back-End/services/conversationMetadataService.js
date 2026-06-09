@@ -233,7 +233,10 @@ async function getConversationList(userId) {
            cm.conversation_id,
            MAX(m.created_at) AS last_message_at,
            SUBSTRING_INDEX(
-             GROUP_CONCAT(m.content ORDER BY m.created_at DESC SEPARATOR CHAR(1)),
+             GROUP_CONCAT(
+               CASE WHEN m.is_deleted = 1 THEN 'This message was deleted' ELSE m.content END
+               ORDER BY m.created_at DESC SEPARATOR CHAR(1)
+             ),
              CHAR(1), 1
            ) AS last_content,
            SUBSTRING_INDEX(
@@ -242,7 +245,7 @@ async function getConversationList(userId) {
            ) AS last_sender_id
          FROM conversation_metadata cm
          LEFT JOIN messages m
-           ON m.conversation_id = cm.conversation_id AND m.is_deleted = 0
+           ON m.conversation_id = cm.conversation_id
          WHERE cm.user_id = ? AND cm.conversation_id LIKE 'dm_%'
          GROUP BY cm.conversation_id, cm.updated_at
        )
@@ -252,7 +255,10 @@ async function getConversationList(userId) {
            gm.group_id AS conversation_id,
            MAX(m.created_at) AS last_message_at,
            SUBSTRING_INDEX(
-             GROUP_CONCAT(m.content ORDER BY m.created_at DESC SEPARATOR CHAR(1)),
+             GROUP_CONCAT(
+               CASE WHEN m.is_deleted = 1 THEN 'This message was deleted' ELSE m.content END
+               ORDER BY m.created_at DESC SEPARATOR CHAR(1)
+             ),
              CHAR(1), 1
            ) AS last_content,
            SUBSTRING_INDEX(
@@ -261,7 +267,7 @@ async function getConversationList(userId) {
            ) AS last_sender_id
          FROM group_members gm
          LEFT JOIN messages m
-           ON m.conversation_id = gm.group_id AND m.is_deleted = 0
+           ON m.conversation_id = gm.group_id
          WHERE gm.user_id = ? AND gm.left_at IS NULL
          GROUP BY gm.group_id
        )
