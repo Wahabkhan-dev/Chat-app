@@ -18,6 +18,7 @@ export function useSocket() {
   const processedMsgIds = useRef(new Set<string>());
   const loadedOnce = useRef(false); // true after first loadData() completes
   const lastSyncAt = useRef(0); // throttle syncMissedMessages against reconnect/focus churn
+  const lastActiveRefetchAt = useRef(0); // throttle open-conversation refetch on reconnect/focus
 
   useEffect(() => {
     if (!state.isAuthenticated || initialized.current) return;
@@ -63,6 +64,26 @@ export function useSocket() {
         dispatch({ type: 'UPDATE_UNREAD_COUNTS', payload: { counts, previews } });
       } catch {
         // best-effort — silently fail so it doesn't surface to the user
+      }
+    };
+
+    // Re-fetch the conversation the user currently has OPEN. The new_message socket events that
+    // fired while offline/backgrounded are not replayed on reconnect, so unread-since (sidebar
+    // badges) isn't enough — the open thread itself must be refreshed or the message never shows.
+    // LOAD_MESSAGES replaces the thread with the server's authoritative list (no duplicates).
+    const refetchActiveConversation = async () => {
+      const activeId = stateRef.current.activeConversation?.id;
+      if (!activeId) return;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      // Throttle so rapid focus toggles / flaky reconnects don't storm the messages endpoint.
+      const nowTs = Date.now();
+      if (nowTs - lastActiveRefetchAt.current < 8000) return;
+      lastActiveRefetchAt.current = nowTs;
+      try {
+        const { messages } = await api.get<{ messages: any[] }>(`/messages/${activeId}`);
+        dispatch({ type: 'LOAD_MESSAGES', payload: { conversationId: activeId, messages } });
+      } catch {
+        // best-effort; the sidebar badge still reflects the unread via syncMissedMessages
       }
     };
 
@@ -253,9 +274,11 @@ export function useSocket() {
         .filter(g => !s.conversationMeta[g.id]?.leftAt)
         .forEach((group) => socket.emit('join_group', { groupId: group.id }));
 
-      // On reconnect (not the very first connect) pull any messages that arrived while offline
+      // On reconnect (not the very first connect) pull any messages that arrived while offline:
+      // sidebar badges via syncMissedMessages, and the OPEN thread via refetchActiveConversation.
       if (loadedOnce.current) {
         syncMissedMessages();
+        refetchActiveConversation();
       }
     });
 
@@ -859,6 +882,10 @@ export function useSocket() {
         // directory on every tab focus multiplied requests across tabs and tripped the
         // 100 req/min rate limiter (429). syncMissedMessages is one batched call, kept.
         syncMissedMessages();
+        // The socket may have reconnected in the background (so the 'connect' refetch was
+        // skipped while hidden). Refresh the open thread now that the user is looking at it,
+        // so messages received while away appear. Throttled inside the helper.
+        refetchActiveConversation();
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
