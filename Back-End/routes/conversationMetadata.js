@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
+const pool = require('../config/database');
 const {
   getMetadata,
   setMuteStatus,
@@ -23,6 +24,26 @@ router.get('/conversations/list', authenticateToken, async (req, res) => {
     res.json({ conversations });
   } catch (err) {
     console.error('Error getting conversation list:', err);
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+// GET /api/conversation-metadata/read-state — fetch all of user's read-timestamps for cross-device sync.
+// On mobile app startup, localStorage is empty, so it uses this to populate lastReadAt for each
+// conversation. Prevents phantom re-notifications after reading on another device.
+router.get('/read-state', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT conversation_id, last_seen_at FROM conversation_last_seen WHERE user_id = ?`,
+      [req.user.id]
+    );
+    const readState = rows.map((row) => ({
+      conversationId: row.conversation_id,
+      lastSeenAt: row.last_seen_at instanceof Date ? row.last_seen_at.toISOString() : String(row.last_seen_at),
+    }));
+    res.json({ readState });
+  } catch (err) {
+    console.error('Error getting read state:', err);
     res.status(500).json({ message: 'Server error.' });
   }
 });

@@ -235,13 +235,13 @@ async function getConversationList(userId) {
            SUBSTRING_INDEX(
              GROUP_CONCAT(
                CASE WHEN m.is_deleted = 1 THEN 'This message was deleted' ELSE m.content END
-               ORDER BY m.created_at DESC SEPARATOR CHAR(1)
+               ORDER BY m.created_at DESC SEPARATOR '||'
              ),
-             CHAR(1), 1
+             '||', 1
            ) AS last_content,
            SUBSTRING_INDEX(
-             GROUP_CONCAT(CAST(m.sender_id AS CHAR) ORDER BY m.created_at DESC SEPARATOR CHAR(1)),
-             CHAR(1), 1
+             GROUP_CONCAT(CAST(m.sender_id AS CHAR) ORDER BY m.created_at DESC SEPARATOR '||'),
+             '||', 1
            ) AS last_sender_id
          FROM conversation_metadata cm
          LEFT JOIN messages m
@@ -257,13 +257,13 @@ async function getConversationList(userId) {
            SUBSTRING_INDEX(
              GROUP_CONCAT(
                CASE WHEN m.is_deleted = 1 THEN 'This message was deleted' ELSE m.content END
-               ORDER BY m.created_at DESC SEPARATOR CHAR(1)
+               ORDER BY m.created_at DESC SEPARATOR '||'
              ),
-             CHAR(1), 1
+             '||', 1
            ) AS last_content,
            SUBSTRING_INDEX(
-             GROUP_CONCAT(CAST(m.sender_id AS CHAR) ORDER BY m.created_at DESC SEPARATOR CHAR(1)),
-             CHAR(1), 1
+             GROUP_CONCAT(CAST(m.sender_id AS CHAR) ORDER BY m.created_at DESC SEPARATOR '||'),
+             '||', 1
            ) AS last_sender_id
          FROM group_members gm
          LEFT JOIN messages m

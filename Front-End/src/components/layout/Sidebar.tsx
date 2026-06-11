@@ -700,7 +700,7 @@ const Sidebar: React.FC<{
       <div className="p-5 border-b border-border bg-card/50">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-2xl relative overflow-hidden shrink-0 bg-transparent">
-            <Image src={BRAND_FAVICON_URL} alt="Mawby Teams icon" fill className="object-contain p-2" />
+            <Image src={BRAND_FAVICON_URL} alt="Mawby Teams icon" fill sizes="40px" className="object-contain p-2" />
           </div>
           <div className="flex flex-col min-w-0">
             <span className="font-bold text-sm font-headline truncate tracking-tight">Mawby Teams</span>

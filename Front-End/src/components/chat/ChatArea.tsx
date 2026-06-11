@@ -1,7 +1,7 @@
 ﻿
 "use client";
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/lib/api';
@@ -44,9 +44,9 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const [showScrollPill, setShowScrollPill] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const uploadErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Show loading spinner while messages are being fetched from API
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-  // True once the conversation has been scrolled to its last message. The loading overlay stays
-  // up until this flips, so the user never sees messages render from the top and then jump.
+  // Only hide spinner after BOTH loading AND scroll-to-bottom complete.
   const [scrollReady, setScrollReady] = useState(false);
   // Tracks which conversations have been fully fetched from the API this session.
   // Using state.messages as the guard was wrong: socket-delivered messages populate
@@ -54,6 +54,10 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   // fetch to be skipped and the user to see only the most recent socket message.
   const apiLoadedConversations = useRef(new Set<string>());
   const initialScrollApplied = useRef(new Set<string>());
+  // Ref (not state) tracking whether a fetch is in-flight. Set synchronously in the
+  // reset useLayoutEffect so the scroll useLayoutEffect reads the correct value
+  // before useEffect has a chance to run setIsLoadingMessages(true).
+  const fetchPendingRef = useRef(false);
   // Auto-scroll-on-new-message tracking. isAtBottomRef reflects whether the user was pinned
   // near the bottom (updated on scroll). prevLastIdRef/prevConvIdRef detect a genuinely NEW
   // newest message (vs older-history pagination, edits, or a conversation switch).
@@ -91,14 +95,24 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     markConversationNotificationsRead(activeConversationId);
   }, [activeConversationId]);
 
+  // Reset scroll state synchronously when conversation changes.
+  // Must be useLayoutEffect (not useEffect) so it runs BEFORE the scroll useLayoutEffect below.
+  // If this were useEffect, the scroll effect would run first (useLayoutEffect always before useEffect),
+  // see the convId still in the applied set, return early, and then this effect would set
+  // scrollReady=false — leaving the spinner stuck forever with no one to dismiss it.
+  useLayoutEffect(() => {
+    if (!activeConversationId) return;
+    initialScrollApplied.current.delete(activeConversationId);
+    setScrollReady(false);
+    // Tell the scroll effect synchronously whether a fetch is about to start.
+    // useLayoutEffect always runs before useEffect, so isLoadingMessages (set in useEffect)
+    // is always stale here. This ref bridges that gap.
+    fetchPendingRef.current = !apiLoadedConversations.current.has(activeConversationId);
+  }, [activeConversationId]);
+
   // Load message history + join socket room whenever conversation changes
   useEffect(() => {
     if (!activeConversationId) return;
-
-    // Reset scroll tracking for new conversation
-    initialScrollApplied.current.delete(activeConversationId);
-    // Hide messages behind the loader until this conversation is scrolled to its last message.
-    setScrollReady(false);
 
     const socket = getSocket();
     if (socket) {
@@ -114,11 +128,10 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     // state.messages[convId] before the conversation is opened, so that check was causing
     // the full history to be skipped and only the latest socket message to be shown.
     if (apiLoadedConversations.current.has(activeConversationId)) {
-      setIsLoadingMessages(false);
       return;
     }
 
-    // Mark as in-flight immediately to prevent double-fetch on fast tab switches
+    // Fetch messages. Show loading spinner until they arrive, then hide it and scroll to bottom.
     apiLoadedConversations.current.add(activeConversationId);
     setIsLoadingMessages(true);
 
@@ -129,11 +142,15 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         if (pinned) {
           dispatch({ type: 'PIN_MESSAGE', payload: { conversationId: activeConversationId, message: pinned } });
         }
+        // Clear the fetch-pending flag before setting state so the scroll
+        // useLayoutEffect sees fetchPendingRef=false when it re-runs
+        fetchPendingRef.current = false;
         setIsLoadingMessages(false);
       })
       .catch((error) => {
         // Allow retry on next open if the fetch failed
         apiLoadedConversations.current.delete(activeConversationId);
+        fetchPendingRef.current = false;
         setIsLoadingMessages(false);
         console.error(`[ChatArea] failed to load messages for ${activeConversationId}:`, error);
       });
@@ -224,30 +241,40 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     return parts.length >= 3 && parts[1] === parts[2];
   }, [state.activeConversation]);
 
-  // Apply scroll to bottom ONCE when conversation opens with messages loaded
-  // This prevents the visual jump/flicker on first render
-  useEffect(() => {
+  // Apply scroll to bottom ONCE when conversation opens and first messages arrive.
+  // useLayoutEffect runs synchronously BEFORE the browser paints. This means:
+  // 1. Messages render in DOM
+  // 2. This effect fires (scroll applied instantly — user never sees pre-scroll position)
+  // 3. setScrollReady(true) triggers re-render (overlay removed)
+  // 4. Browser paints ONCE — chat is already at bottom AND spinner is already gone
+  // This eliminates the timing gap between scroll and spinner removal.
+  useLayoutEffect(() => {
     if (!activeConversationId || !scrollRef.current) return;
-
-    // Only scroll once per conversation
     if (initialScrollApplied.current.has(activeConversationId)) return;
 
-    // Only scroll if messages are loaded
-    if (rawMessages.length === 0) return;
+    // If a fetch is in-flight, wait — we need the real message list before scrolling.
+    // fetchPendingRef is set synchronously in the reset useLayoutEffect above,
+    // so it's always current by the time this runs.
+    if (fetchPendingRef.current) return;
 
-    // Mark as applied before scroll (prevent multiple triggers)
+    // Empty conversation confirmed by API — show empty state immediately
+    if (rawMessages.length === 0) {
+      initialScrollApplied.current.add(activeConversationId);
+      setScrollReady(true);
+      return;
+    }
+
+    // Mark as applied so future message arrivals don't re-trigger
     initialScrollApplied.current.add(activeConversationId);
 
-    // Use requestAnimationFrame to ensure scroll happens after DOM is ready. Once we've pinned
-    // to the bottom, reveal the messages (drop the loading overlay) — the last message is now
-    // in view, so there's no top-to-bottom jump.
-    requestAnimationFrame(() => {
-      if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      }
-      setScrollReady(true);
-    });
-  }, [activeConversationId, rawMessages.length]);
+    // Scroll instantly before browser paint — user never sees the pre-scroll position
+    scrollRef.current.style.scrollBehavior = 'auto';
+    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    scrollRef.current.style.scrollBehavior = '';
+
+    // Hide spinner in same paint cycle as the scroll
+    setScrollReady(true);
+  }, [activeConversationId, rawMessages, isLoadingMessages]);
 
   // Handle manual scroll to bottom when user clicks scroll pill
   // (separate from initial load scroll)
@@ -569,14 +596,14 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         onScroll={handleScroll}
       >
 
-        {!isLoadingMessages && filteredMessages.length === 0 && (
+        {filteredMessages.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 opacity-30">
             <Search className="h-12 w-12 mb-4" />
             <p className="text-sm font-bold uppercase tracking-widest">No messages found</p>
           </div>
         )}
 
-        {!isLoadingMessages && filteredMessages.map((msg, idx) => {
+        {filteredMessages.map((msg, idx) => {
           const prevMsg = filteredMessages[idx - 1];
           const showDivider = !prevMsg || format(new Date(msg.timestamp), 'yyyy-MM-dd') !== format(new Date(prevMsg.timestamp), 'yyyy-MM-dd');
           const isGrouped = prevMsg && prevMsg.senderId === msg.senderId && 
@@ -617,12 +644,14 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         )}
       </div>
 
-        {/* Loading overlay — stays up until the conversation is scrolled to its last message,
-            so the user never sees messages render from the top and then jump to the bottom. */}
-        {(isLoadingMessages || (!scrollReady && filteredMessages.length > 0)) && (
-          <div className="absolute inset-0 z-20 bg-background flex flex-col items-center justify-center">
-            <Loader2 className="h-8 w-8 mb-4 text-primary animate-spin" />
-            <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Loading conversation…</p>
+        {/* Loading overlay — shows while fetching AND while scrolling to bottom.
+            Only hides when BOTH are complete: messages loaded AND scrolled to bottom. */}
+        {(isLoadingMessages || !scrollReady) && (
+          <div className="absolute inset-0 z-50 bg-background flex flex-col items-center justify-center pointer-events-auto">
+            <div className="animate-spin">
+              <Loader2 className="h-8 w-8 text-primary" />
+            </div>
+            <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground mt-4">Loading conversation…</p>
           </div>
         )}
       </div>

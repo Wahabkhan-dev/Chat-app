@@ -434,9 +434,9 @@ const SettingsPage: React.FC = () => {
                         {isEnabling ? (
                           <><Loader2 className="h-4 w-4 animate-spin" />Enabling…</>
                         ) : pushStatus === 'subscribed' ? (
-                          <><CheckCircle2 className="h-4 w-4" />Notificationss Enabled</>
+                          <><CheckCircle2 className="h-4 w-4" />Notifications Enabled</>
                         ) : (
-                          <><Bell className="h-4 w-4" />Enable Notificationss</>
+                          <><Bell className="h-4 w-4" />Enable Notifications</>
                         )}
                       </Button>
                     )}

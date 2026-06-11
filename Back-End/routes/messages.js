@@ -103,6 +103,89 @@ router.get('/:conversationId/pinned', authenticateToken, async (req, res) => {
   }
 });
 
+// GET /api/messages/unread-counts — server-driven unread counts using conversation_last_seen.
+// Returns counts + previews for every conversation the user is a member of.
+// No localStorage needed — the server's conversation_last_seen table is the single source of truth.
+router.get('/unread-counts', authenticateToken, async (req, res) => {
+  const userId = req.user.id;
+  try {
+    const [rows] = await pool.query(
+      `SELECT
+         conv.conversation_id,
+         COUNT(CASE
+           WHEN m.sender_id != ?
+             AND m.is_deleted = 0
+             AND (cls.last_seen_at IS NULL OR m.created_at > cls.last_seen_at)
+             AND (conv.left_at IS NULL OR m.created_at <= conv.left_at)
+           THEN m.id
+         END) AS unread_count,
+         MAX(CASE WHEN conv.left_at IS NULL OR m.created_at <= conv.left_at THEN m.created_at END) AS last_message_at,
+         SUBSTRING_INDEX(
+           GROUP_CONCAT(
+             CASE WHEN conv.left_at IS NULL OR m.created_at <= conv.left_at
+                  THEN (CASE WHEN m.is_deleted = 1 THEN 'This message was deleted' ELSE m.content END)
+             END
+             ORDER BY m.created_at DESC SEPARATOR '||'
+           ), '||', 1
+         ) AS last_content,
+         SUBSTRING_INDEX(
+           GROUP_CONCAT(
+             CASE WHEN conv.left_at IS NULL OR m.created_at <= conv.left_at
+                  THEN CAST(m.sender_id AS CHAR)
+             END
+             ORDER BY m.created_at DESC SEPARATOR '||'
+           ), '||', 1
+         ) AS last_sender_id,
+         SUBSTRING_INDEX(
+           GROUP_CONCAT(
+             CASE WHEN conv.left_at IS NULL OR m.created_at <= conv.left_at
+                  THEN COALESCE(m.type, 'text')
+             END
+             ORDER BY m.created_at DESC SEPARATOR '||'
+           ), '||', 1
+         ) AS last_type
+       FROM (
+         SELECT cm.conversation_id, NULL AS left_at
+         FROM conversation_metadata cm
+         WHERE cm.user_id = ? AND cm.conversation_id LIKE 'dm_%'
+         UNION ALL
+         SELECT gm.group_id AS conversation_id, gm.left_at
+         FROM group_members gm
+         WHERE gm.user_id = ?
+       ) conv
+       LEFT JOIN conversation_last_seen cls
+         ON cls.conversation_id = conv.conversation_id AND cls.user_id = ?
+       LEFT JOIN messages m ON m.conversation_id = conv.conversation_id
+       GROUP BY conv.conversation_id
+       LIMIT 500`,
+      [userId, userId, userId, userId]
+    );
+
+    const counts = {};
+    const previews = {};
+    rows.forEach((row) => {
+      const convId = row.conversation_id;
+      counts[convId] = Number(row.unread_count);
+      if (row.last_message_at) {
+        const ts = row.last_message_at instanceof Date
+          ? row.last_message_at.toISOString()
+          : String(row.last_message_at).replace(' ', 'T');
+        previews[convId] = {
+          senderId: row.last_sender_id ? String(row.last_sender_id) : '',
+          content: row.last_content || '',
+          type: row.last_type || 'text',
+          timestamp: ts,
+        };
+      }
+    });
+
+    res.json({ counts, previews });
+  } catch (err) {
+    console.error('GET /messages/unread-counts error:', err);
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
 // GET /api/messages/unread/counts — get unread message counts for all conversations
 router.get('/unread/counts', authenticateToken, async (req, res) => {
   const userId = req.user.id;

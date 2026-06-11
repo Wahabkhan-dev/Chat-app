@@ -318,6 +318,11 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
     dispatch({ type: 'SET_REPLYING_TO', payload: null });
     dispatch({ type: 'CLEAR_UPLOADED_FILES' });
     setIsSending(false);
+    // Keep keyboard open on mobile — refocus the textarea immediately after send
+    // so the user can type the next message without tapping to bring the keyboard back
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+    }
   };
 
   const extractMentions = (text: string) => {

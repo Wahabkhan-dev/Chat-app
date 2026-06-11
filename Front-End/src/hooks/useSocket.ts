@@ -28,39 +28,19 @@ export function useSocket() {
     initialized.current = true;
     const socket = connectSocket(token);
 
-    // Fetch unread counts for conversations that received messages while socket was down.
-    // Called both after initial load and on every reconnect so the sidebar badges stay accurate.
+    // Fetch server-driven unread counts for all conversations.
+    // Uses conversation_last_seen on the server — no localStorage needed.
+    // Called on initial load, every reconnect, and on tab focus.
     const syncMissedMessages = async () => {
-      // Throttle: socket 'connect' (reconnects) and tab-focus both call this. With multiple
-      // tabs of the same user, unthrottled calls storm /messages/unread-since and trip the
-      // 30 req/min messages rate limiter (429). At most once every 15s is plenty — real-time
-      // delivery still happens via the new_message socket event regardless.
+      // Throttle so rapid reconnects / focus events don't storm the endpoint.
       const nowTs = Date.now();
       if (nowTs - lastSyncAt.current < 15000) return;
       lastSyncAt.current = nowTs;
       try {
-        const uid = stateRef.current.currentUser?.id;
-        const stored = uid ? localStorage.getItem(`cmeta_${uid}`) : null;
-        const savedMeta = stored ? JSON.parse(stored) : {};
-        const fallbackSince = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-
-        // Conversations with a lastReadAt — use the exact timestamp
-        const toCheck: Array<{ id: string; since: string }> = Object.entries(savedMeta)
-          .filter(([, m]: any) => m.lastReadAt)
-          .map(([id, m]: any) => ({ id, since: m.lastReadAt }));
-
-        // Groups without a lastReadAt — include with a 30-day fallback so offline
-        // messages received in groups the user never explicitly opened are detected.
-        const checkedIds = new Set(toCheck.map(c => c.id));
-        stateRef.current.groups
-          .filter(g => !stateRef.current.conversationMeta[g.id]?.leftAt && !checkedIds.has(g.id))
-          .forEach(g => toCheck.push({ id: g.id, since: fallbackSince }));
-
-        if (toCheck.length === 0) return;
-        const { counts, previews } = await api.post<{
+        const { counts, previews } = await api.get<{
           counts: Record<string, number>;
           previews: Record<string, { senderId: string; content: string; type: string; timestamp: string }>;
-        }>('/messages/unread-since', { conversations: toCheck });
+        }>('/messages/unread-counts');
         dispatch({ type: 'UPDATE_UNREAD_COUNTS', payload: { counts, previews } });
       } catch {
         // best-effort — silently fail so it doesn't surface to the user
@@ -177,24 +157,13 @@ export function useSocket() {
           console.error('[useSocket] failed to load notifications:', notifsRes.reason);
         }
 
-        // Compute unread counts for messages received while user was offline
-        // Uses lastReadAt (when user last viewed a conversation) not lastMessage.timestamp (which can be stale)
+        // Compute unread counts using the server-driven endpoint — no localStorage required.
+        // The server joins conversation_last_seen with messages to count what's unread.
         try {
           const uid = stateRef.current.currentUser?.id;
-          const stored = uid ? localStorage.getItem(`cmeta_${uid}`) : null;
-          const savedMeta = stored ? JSON.parse(stored) : {};
-          const fallbackSince = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-          const toCheck: Array<{ id: string; since: string }> = Object.entries(savedMeta)
-            .filter(([, m]: any) => m.lastReadAt)
-            .map(([id, m]: any) => ({ id, since: m.lastReadAt }));
-          // Also include groups with no lastReadAt using a 30-day fallback
-          const checkedIds = new Set(toCheck.map((c: any) => c.id));
-          groups
-            .filter((g: any) => !stateRef.current.conversationMeta[g.id]?.leftAt && !checkedIds.has(g.id))
-            .forEach((g: any) => toCheck.push({ id: g.id, since: fallbackSince }));
-          if (toCheck.length > 0) {
-            const { counts, previews } = await api.post<{ counts: Record<string, number>; previews: Record<string, { senderId: string; content: string; type: string; timestamp: string }> }>('/messages/unread-since', { conversations: toCheck });
-            dispatch({ type: 'UPDATE_UNREAD_COUNTS', payload: { counts, previews } });
+          const { counts, previews } = await api.get<{ counts: Record<string, number>; previews: Record<string, { senderId: string; content: string; type: string; timestamp: string }> }>('/messages/unread-counts');
+          dispatch({ type: 'UPDATE_UNREAD_COUNTS', payload: { counts, previews } });
+          if (Object.keys(counts).length > 0) {
 
             // Add bell-panel notifications for each conversation that has offline unread messages.
             // Uses locally-scoped `users` and `groups` (just fetched) to avoid stale-ref race.
@@ -261,9 +230,20 @@ export function useSocket() {
 
     loadData();
 
+    // STRICT presence: report whether the app is currently on-screen. The server marks the user
+    // online only while at least one of their tabs/devices is visible.
+    const emitPresence = () => {
+      const sock = getSocket();
+      if (!sock?.connected) return;
+      const visible = typeof document === 'undefined' || document.visibilityState === 'visible';
+      sock.emit('presence_state', { visible });
+    };
+
     // ── Rejoin rooms on every (re)connect so group and DM events work after reconnects ──
-    socket.on('connect', () => {
+    socket.on('connect', async () => {
       const s = stateRef.current;
+      // Tell the server our current on-screen state as soon as we (re)connect.
+      emitPresence();
       if (s.activeConversation?.type === 'dm' && s.currentUser?.id) {
         const parts = s.activeConversation.id.split('_');
         const otherId = parts[1] === String(s.currentUser.id) ? parts[2] : parts[1];
@@ -274,12 +254,11 @@ export function useSocket() {
         .filter(g => !s.conversationMeta[g.id]?.leftAt)
         .forEach((group) => socket.emit('join_group', { groupId: group.id }));
 
-      // On reconnect (not the very first connect) pull any messages that arrived while offline:
-      // sidebar badges via syncMissedMessages, and the OPEN thread via refetchActiveConversation.
-      if (loadedOnce.current) {
-        syncMissedMessages();
-        refetchActiveConversation();
-      }
+      // Pull missed messages on both initial connect and reconnects.
+      // syncMissedMessages calls the server-driven /messages/unread-counts endpoint,
+      // so no localStorage pre-seeding is needed before calling it.
+      syncMissedMessages();
+      refetchActiveConversation();
     });
 
     const isBlockedConversation = (conversationId?: string) => {
@@ -872,6 +851,9 @@ export function useSocket() {
     // Foreground: when the user switches back to the app, reconnect immediately
     // rather than waiting for the next heartbeat tick.
     const handleVisibility = async () => {
+      // Report on-screen state on EVERY change (visible or hidden) so presence flips correctly
+      // when the user leaves or returns to the app.
+      emitPresence();
       if (document.visibilityState !== 'visible') return;
       const sock = getSocket();
       if (!sock?.connected && stateRef.current.isAuthenticated) {

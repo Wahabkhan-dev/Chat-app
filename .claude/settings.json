@@ -15,7 +15,15 @@
       "Bash(node --check services/sessionService.js)",
       "Bash(node -e \"process.env.JWT_SECRET='x'; const s=require\\('./services/sessionService'\\); console.log\\('module loads OK'\\);\")",
       "Bash(grep -rln \"getConversationList\\\\|async function getConversationList\\\\|getConversationList =\" services models)",
-      "Bash(grep -rln \"unread-since\\\\|unread/counts\\\\|unreadSince\\\\|getUnreadCounts\" routes services models)"
+      "Bash(grep -rln \"unread-since\\\\|unread/counts\\\\|unreadSince\\\\|getUnreadCounts\" routes services models)",
+      "Bash(grep -nA8 \"MARK_CONVERSATION_READ\" Front-End/src/context/AppContext.tsx)",
+      "Bash(grep -nB2 -A4 \"update_last_seen\" Front-End/src/components/chat/ChatArea.tsx)",
+      "Bash(grep -nA30 \"getAllMetadataForUser\\\\|function getAllMetadata\" routes/conversationMetadata.js)",
+      "Bash(grep -nA40 \"getAllMetadataForUser\\\\|async function getAllMetadata\" services/conversationMetadataService.js)",
+      "Bash(grep -nA15 \"update_last_seen\" socket.js)",
+      "Bash(node --check routes/conversationMetadata.js)",
+      "Bash(xargs grep -l \"pool\\\\|mysql.createPool\\\\|createConnection\")",
+      "Bash(node --check services/conversationMetadataService.js)"
     ]
   }
 }

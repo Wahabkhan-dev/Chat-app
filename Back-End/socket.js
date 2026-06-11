@@ -106,6 +106,38 @@ async function createNotification({ type, recipientId, senderId, conversationId,
 function setupSocket(io, optimizationService) {
   optimizationService = optimizationService || {}; // Fallback if not provided
 
+  // On startup, reset everyone to offline. A server restart drops all sockets without firing
+  // clean disconnects, which would otherwise leave users stuck "online". Each user is marked
+  // online again the moment their socket (re)connects below.
+  pool.query("UPDATE users SET status = 'offline' WHERE status <> 'offline'")
+    .catch((err) => console.error('[socket] startup presence reset failed:', err.message));
+
+  // ── Presence: STRICT rule — a user is "online" only while they are actually on the app
+  // screen (an app tab that is open and visible). We track, per user, the set of sockets that
+  // are currently on-screen. Online = that set is non-empty. This is aggregated across devices/
+  // tabs, so hiding one tab won't mark you offline while another is still visible. Message
+  // delivery is intentionally NOT affected by this — it stays driven by socket connectivity.
+  const onScreenSockets = new Map(); // userId(string) -> Set<socketId> currently visible
+
+  // Recompute a user's online/offline from their on-screen set and persist + broadcast it.
+  // Only writes/broadcasts when the value actually changes, so there's no event spam.
+  async function applyPresence(uid, role) {
+    const key = String(uid);
+    const set = onScreenSockets.get(key);
+    const online = !!(set && set.size > 0);
+    try {
+      const [res] = await pool.query(
+        'UPDATE users SET status = ? WHERE id = ? AND status <> ?',
+        [online ? 'online' : 'offline', uid, online ? 'online' : 'offline']
+      );
+      if (res.affectedRows > 0 && role !== 'admin') {
+        io.emit('user_status_change', { userId: key, status: online ? 'online' : 'offline' });
+      }
+    } catch (err) {
+      console.error(`[presence] applyPresence failed for user ${uid}:`, err.message);
+    }
+  }
+
   // JWT authentication middleware
   io.use(async (socket, next) => {
     const token = socket.handshake.auth.token;
@@ -135,11 +167,16 @@ function setupSocket(io, optimizationService) {
     // Wrap the entire async setup so an unhandled rejection never crashes the process
     (async () => {
       try {
-        // Mark online — admins do not broadcast presence to chat users
-        await pool.query('UPDATE users SET status = ? WHERE id = ?', ['online', userId]);
-        if (socket.user.role !== 'admin') {
-          socket.broadcast.emit('user_status_change', { userId: String(userId), status: 'online' });
+        // A freshly-connected socket means the app is open in front of the user — treat it as
+        // on-screen until the client tells us otherwise (presence_state with visible:false).
+        {
+          let set = onScreenSockets.get(String(userId));
+          if (!set) { set = new Set(); onScreenSockets.set(String(userId), set); }
+          set.add(socket.id);
+        }
+        await applyPresence(userId, socket.user.role);
 
+        if (socket.user.role !== 'admin') {
           // PHASE 2 FIX: Notify all OTHER devices of this user that a device just connected
           // This ensures online status syncs across all devices of the same user
           socket.broadcast.to(`user_${userId}`).emit('device_status_change', {
@@ -159,10 +196,73 @@ function setupSocket(io, optimizationService) {
             [userId]
         );
           userGroups.forEach((g) => socket.join(String(g.group_id)));
+
+        // Deliver-on-connect sweep: this user just came online, so any messages sent to them
+        // while they were offline must flip from "sent" (single tick) to "delivered" (double
+        // tick) on the SENDER's screen. Real-time delivery only covers messages that arrive
+        // while connected; this catches the backlog. Bounded (recent + LIMIT) to stay cheap.
+        try {
+          const [dmRows] = await pool.query(
+            "SELECT conversation_id FROM conversation_metadata WHERE user_id = ? AND conversation_id LIKE 'dm\\_%'",
+            [userId]
+          );
+          const convIds = [
+            ...dmRows.map((r) => r.conversation_id),
+            ...userGroups.map((g) => String(g.group_id)),
+          ];
+          if (convIds.length > 0) {
+            const [pending] = await pool.query(
+              `SELECT m.id, m.sender_id, m.conversation_id
+                 FROM messages m
+                WHERE m.conversation_id IN (?)
+                  AND m.sender_id <> ?
+                  AND m.is_deleted = 0
+                  AND m.created_at > (NOW() - INTERVAL 7 DAY)
+                  AND NOT EXISTS (
+                    SELECT 1 FROM message_deliveries d
+                     WHERE d.message_id = m.id AND d.user_id = ?
+                  )
+                ORDER BY m.created_at DESC
+                LIMIT 200`,
+              [convIds, userId, userId]
+            );
+            if (pending.length > 0) {
+              await pool.query(
+                'INSERT IGNORE INTO message_deliveries (message_id, user_id) VALUES ?',
+                [pending.map((m) => [m.id, userId])]
+              );
+              const deliveredAt = new Date().toISOString();
+              pending.forEach((m) => {
+                io.to(`user_${m.sender_id}`).emit('message_delivered', {
+                  messageId: String(m.id),
+                  conversationId: m.conversation_id,
+                  deliveredAt,
+                });
+              });
+            }
+          }
+        } catch (sweepErr) {
+          console.error(`[socket] deliver-on-connect sweep failed for user ${userId}:`, sweepErr.message);
+        }
       } catch (err) {
         console.error(`[socket] connection setup error for user ${userId}:`, err.message);
       }
     })();
+
+    // STRICT presence: the client reports whether the app is currently on-screen (tab visible).
+    // visible:true  -> this socket is on-screen  -> user shows online
+    // visible:false -> app hidden/backgrounded   -> user shows offline (unless another tab/device
+    //                  of theirs is still on-screen). Does not touch message delivery.
+    socket.on('presence_state', ({ visible }) => {
+      const key = String(userId);
+      let set = onScreenSockets.get(key);
+      if (!set) { set = new Set(); onScreenSockets.set(key, set); }
+      const wasOnline = set.size > 0;
+      if (visible) set.add(socket.id); else set.delete(socket.id);
+      if (set.size === 0) onScreenSockets.delete(key);
+      // Only recompute when the online/offline state actually flips.
+      if (wasOnline !== (set.size > 0)) applyPresence(userId, socket.user.role);
+    });
 
     // Client requests to join a DM room (called when opening a DM conversation)
     socket.on('join_dm', ({ otherUserId }) => {
@@ -1087,6 +1187,8 @@ socket.on('typing', async ({ conversationId }) => {
     // Update last_seen time for a conversation (called when user opens/views a conversation)
     socket.on('update_last_seen', async ({ conversationId, lastMessageId }, callback) => {
       try {
+        const readAt = new Date().toISOString();
+
         // Upsert last_seen record
         await pool.query(
           `INSERT INTO conversation_last_seen (user_id, conversation_id, last_seen_at, last_message_id)
@@ -1094,6 +1196,15 @@ socket.on('typing', async ({ conversationId }) => {
            ON DUPLICATE KEY UPDATE last_seen_at = NOW(), last_message_id = ?`,
           [userId, conversationId, lastMessageId, lastMessageId]
         );
+
+        // Notify other devices of this user that this conversation was read,
+        // so their unread badges clear in real time without waiting for a poll.
+        socket.to(`user_${userId}`).emit('conversation_read', {
+          conversationId,
+          userId: String(userId),
+          readUntilMessageId: lastMessageId ? String(lastMessageId) : null,
+          readAt,
+        });
 
         callback?.({ success: true });
       } catch (err) {
@@ -1113,26 +1224,17 @@ socket.on('typing', async ({ conversationId }) => {
     }, 30000); // Every 30 seconds
 
     socket.on('disconnect', async () => {
-      // PHASE 2 FIX: Only mark offline if NO OTHER ACTIVE SESSIONS exist
+      // STRICT presence: drop this socket from the user's on-screen set. If none of their tabs/
+      // devices are on-screen anymore, they go offline. Closing the app disconnects the socket,
+      // so this covers "left the app" too. Recompute only flips status when it actually changes.
       try {
-        const [activeSessions] = await pool.query(
-          'SELECT COUNT(*) as count FROM user_sessions WHERE user_id = ? AND is_active = 1 AND expires_at > NOW()',
-          [userId]
-        );
-
-        // If user still has other active sessions, don't mark them offline
-        if (activeSessions[0]?.count > 0) {
-          console.log(`[socket] user ${userId} still has ${activeSessions[0].count} active sessions, not marking offline`);
-          return;
+        const key = String(userId);
+        const set = onScreenSockets.get(key);
+        if (set) {
+          set.delete(socket.id);
+          if (set.size === 0) onScreenSockets.delete(key);
         }
-
-        // No other sessions — mark as offline
-        await pool.query('UPDATE users SET status = ? WHERE id = ?', ['offline', userId]);
-
-        // Admins do not broadcast presence to chat users
-        if (socket.user.role !== 'admin') {
-          socket.broadcast.emit('user_status_change', { userId: String(userId), status: 'offline' });
-        }
+        await applyPresence(userId, socket.user.role);
       } catch (err) {
         console.error(`[socket] disconnect error for user ${userId}:`, err.message);
       }
