@@ -142,6 +142,15 @@ router.post('/verify-otp', async (req, res) => {
 
     const { password: _, ...userWithoutPassword } = user;
 
+    // Set HTTP-Only cookie for persistent mobile sessions
+    res.cookie('auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 10 * 365 * 24 * 60 * 60 * 1000, // 10 years
+      path: '/',
+    });
+
     res.json({
       message: 'Login successful.',
       token,
@@ -249,6 +258,15 @@ router.post('/refresh', authenticateToken, async (req, res) => {
       ipAddress: req.ip,
     });
 
+    // Set HTTP-Only cookie for persistent mobile sessions
+    res.cookie('auth_token', newToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 10 * 365 * 24 * 60 * 60 * 1000, // 10 years
+      path: '/',
+    });
+
     res.json({
       message: 'Token refreshed.',
       token: newToken,
@@ -275,6 +293,8 @@ router.post('/refresh', authenticateToken, async (req, res) => {
 router.post('/logout', authenticateToken, async (req, res) => {
   try {
     await blacklistToken(req.token);
+    // Clear HTTP-Only cookie
+    res.clearCookie('auth_token', { path: '/' });
     console.log(`User ${req.user.id} (${req.user.email}) logged out from current device`);
     res.json({ message: 'Logged out successfully.', timestamp: new Date().toISOString() });
   } catch (err) {

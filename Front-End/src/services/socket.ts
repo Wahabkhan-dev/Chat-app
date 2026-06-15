@@ -48,6 +48,7 @@ export function connectSocket(token: string): Socket {
     reconnectionAttempts: Infinity,  // never give up
     reconnectionDelay: 1000,
     reconnectionDelayMax: 10000,     // cap backoff at 10 s
+    withCredentials: true, // Send HTTP-Only cookies for mobile sessions
   });
 
   socket.on('connect', () => {

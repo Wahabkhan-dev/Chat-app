@@ -41,6 +41,7 @@ async function request<T>(
     res = await fetch(`${BASE_URL}${endpoint}`, {
       ...options,
       headers,
+      credentials: 'include', // Send HTTP-Only cookies with every request (mobile fix)
     });
   } catch (networkErr) {
     // fetch rejects on network failure / CORS / server unreachable — surface a clear,

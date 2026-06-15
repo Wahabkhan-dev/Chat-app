@@ -3,8 +3,17 @@ const { isTokenBlacklisted, updateSessionActivity, hashToken } = require('../ser
 require('dotenv').config();
 
 const authenticateToken = async (req, res, next) => {
+  // Try to get token from Authorization header first (for API clients)
+  let token = null;
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+  if (authHeader && authHeader.split(' ')[1]) {
+    token = authHeader.split(' ')[1]; // Bearer TOKEN
+  }
+
+  // Fall back to HTTP-Only cookie (for browsers/mobile apps)
+  if (!token && req.cookies && req.cookies.auth_token) {
+    token = req.cookies.auth_token;
+  }
 
   if (!token) {
     return res.status(401).json({ message: 'Access denied. No token provided.' });
