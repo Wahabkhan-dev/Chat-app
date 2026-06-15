@@ -65,6 +65,11 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const prevConvIdRef = useRef<string | null>(null);
   const prevLastIdRef = useRef<string | number | null>(null);
 
+  // Scroll-to-load tracking: load older messages when user scrolls to top
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const loadingOlderRef = useRef(false);
+  const hasMoreOlderRef = useRef(true); // Until we get < 50 messages, assume more exist
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -213,6 +218,55 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
       window.removeEventListener('focus', handleViewed);
     };
   }, [activeConversationId, rawMessages.length, state.currentUser?.id]);
+
+  // Auto-load older messages when user scrolls to top
+  useEffect(() => {
+    if (!scrollRef.current || !activeConversationId) return;
+
+    const handleScroll = async () => {
+      // Only load if scrolled to top AND not already loading AND more messages exist
+      if (scrollRef.current!.scrollTop > 50 || loadingOlderRef.current || !hasMoreOlderRef.current) return;
+
+      const oldestMessage = rawMessages[0];
+      if (!oldestMessage) return;
+
+      loadingOlderRef.current = true;
+      setIsLoadingOlder(true);
+
+      try {
+        const { messages } = await api.get<{ messages: any[] }>(
+          `/messages/${activeConversationId}?before=${oldestMessage.id}&limit=50`
+        );
+
+        if (messages.length === 0) {
+          // No more messages, we've reached the beginning
+          hasMoreOlderRef.current = false;
+        } else if (messages.length < 50) {
+          // Got fewer than expected, must be at the beginning
+          hasMoreOlderRef.current = false;
+          // Prepend the loaded messages
+          dispatch({
+            type: 'PREPEND_MESSAGES',
+            payload: { conversationId: activeConversationId, messages },
+          });
+        } else {
+          // Got full batch, more may exist
+          dispatch({
+            type: 'PREPEND_MESSAGES',
+            payload: { conversationId: activeConversationId, messages },
+          });
+        }
+      } catch (error) {
+        console.error('[ChatArea] failed to load older messages:', error);
+      } finally {
+        loadingOlderRef.current = false;
+        setIsLoadingOlder(false);
+      }
+    };
+
+    scrollRef.current.addEventListener('scroll', handleScroll);
+    return () => scrollRef.current?.removeEventListener('scroll', handleScroll);
+  }, [activeConversationId, rawMessages]);
 
   const filteredMessages = useMemo(() => {
     if (!state.chatUI.isSearchActive || !state.chatUI.searchQuery) return rawMessages;
@@ -600,6 +654,14 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
           <div className="flex flex-col items-center justify-center py-20 opacity-30">
             <Search className="h-12 w-12 mb-4" />
             <p className="text-sm font-bold uppercase tracking-widest">No messages found</p>
+          </div>
+        )}
+
+        {/* Loading older messages indicator */}
+        {isLoadingOlder && (
+          <div className="flex items-center justify-center gap-2 py-4 text-xs text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Loading older messages...</span>
           </div>
         )}
 

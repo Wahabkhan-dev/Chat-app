@@ -412,6 +412,15 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         },
       };
     }
+    case 'PREPEND_MESSAGES': {
+      const { conversationId: prependConvId, messages: messagesToPrepend } = action.payload;
+      const existing = state.messages[prependConvId] || [];
+      // Prepend new messages to the beginning (oldest messages first when loading history)
+      return {
+        ...state,
+        messages: { ...state.messages, [prependConvId]: [...messagesToPrepend, ...existing] },
+      };
+    }
     case 'UPDATE_USER_STATUS':
       return {
         ...state,
