@@ -24,7 +24,11 @@
       "Bash(node --check routes/conversationMetadata.js)",
       "Bash(xargs grep -l \"pool\\\\|mysql.createPool\\\\|createConnection\")",
       "Bash(node --check services/conversationMetadataService.js)",
-      "Bash(grep -iv \"is_deleted\\\\|deleted_at\\\\|deleted_by\\\\|deletedAt\\\\|deletedBy\\\\|isDeleted\\\\|soft.del\\\\|message_deleted\\\\|DELETE /\\\\|// delet\\\\|console\")"
+      "Bash(grep -iv \"is_deleted\\\\|deleted_at\\\\|deleted_by\\\\|deletedAt\\\\|deletedBy\\\\|isDeleted\\\\|soft.del\\\\|message_deleted\\\\|DELETE /\\\\|// delet\\\\|console\")",
+      "Bash(npm start *)",
+      "Bash(node -c routes/auth.js)",
+      "Bash(node -c middleware/auth.js)",
+      "Bash(node -c server.js)"
     ]
   }
 }

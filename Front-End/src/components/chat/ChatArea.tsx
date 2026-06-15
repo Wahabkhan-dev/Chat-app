@@ -140,7 +140,7 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     apiLoadedConversations.current.add(activeConversationId);
     setIsLoadingMessages(true);
 
-    api.get<{ messages: any[] }>(`/messages/${activeConversationId}`)
+    api.get<{ messages: any[] }>(`/messages/${activeConversationId}?limit=100`)
       .then(({ messages }) => {
         dispatch({ type: 'LOAD_MESSAGES', payload: { conversationId: activeConversationId, messages } });
         const pinned = messages.find((m: any) => m.isPinned);
@@ -219,13 +219,25 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     };
   }, [activeConversationId, rawMessages.length, state.currentUser?.id]);
 
-  // Auto-load older messages when user scrolls to top
+  // Auto-load older messages when user scrolls up (WhatsApp style)
+  // Loads 100 messages on first open, then auto-loads more when < 50 messages remain above scroll
   useEffect(() => {
     if (!scrollRef.current || !activeConversationId) return;
 
     const handleScroll = async () => {
-      // Only load if scrolled to top AND not already loading AND more messages exist
-      if (scrollRef.current!.scrollTop > 50 || loadingOlderRef.current || !hasMoreOlderRef.current) return;
+      const scrollTop = scrollRef.current!.scrollTop;
+      const scrollHeight = scrollRef.current!.scrollHeight;
+      const clientHeight = scrollRef.current!.clientHeight;
+
+      // Load more if:
+      // 1. User scrolled up (scrollTop < 200px)
+      // 2. NOT already loading
+      // 3. More messages exist
+      // 4. Fewer than 50 messages above scroll position (user scrolled past the middle)
+      const messagesAboveScroll = Math.ceil((scrollTop / scrollHeight) * rawMessages.length);
+      if (scrollTop > 200 || loadingOlderRef.current || !hasMoreOlderRef.current || messagesAboveScroll > 50) {
+        return;
+      }
 
       const oldestMessage = rawMessages[0];
       if (!oldestMessage) return;
@@ -234,23 +246,23 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
       setIsLoadingOlder(true);
 
       try {
+        // Load 100 messages at a time (not 50) to prevent constant reloading
         const { messages } = await api.get<{ messages: any[] }>(
-          `/messages/${activeConversationId}?before=${oldestMessage.id}&limit=50`
+          `/messages/${activeConversationId}?before=${oldestMessage.id}&limit=100`
         );
 
         if (messages.length === 0) {
-          // No more messages, we've reached the beginning
+          // No more messages, user reached the beginning
           hasMoreOlderRef.current = false;
-        } else if (messages.length < 50) {
-          // Got fewer than expected, must be at the beginning
+        } else if (messages.length < 100) {
+          // Got fewer than 100, must be at the beginning
           hasMoreOlderRef.current = false;
-          // Prepend the loaded messages
           dispatch({
             type: 'PREPEND_MESSAGES',
             payload: { conversationId: activeConversationId, messages },
           });
         } else {
-          // Got full batch, more may exist
+          // Got full 100, more may exist
           dispatch({
             type: 'PREPEND_MESSAGES',
             payload: { conversationId: activeConversationId, messages },
@@ -662,6 +674,13 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
           <div className="flex items-center justify-center gap-2 py-4 text-xs text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
             <span>Loading older messages...</span>
+          </div>
+        )}
+
+        {/* Beginning of conversation indicator */}
+        {!hasMoreOlderRef.current && rawMessages.length > 0 && !isLoadingOlder && (
+          <div className="flex items-center justify-center py-4 text-xs text-muted-foreground">
+            <span>Beginning of conversation</span>
           </div>
         )}
 

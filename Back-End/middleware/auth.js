@@ -11,8 +11,17 @@ const authenticateToken = async (req, res, next) => {
   }
 
   // Fall back to HTTP-Only cookie (for browsers/mobile apps)
-  if (!token && req.cookies && req.cookies.auth_token) {
-    token = req.cookies.auth_token;
+  // Parse cookie manually without cookie-parser dependency
+  if (!token) {
+    const cookieHeader = req.headers['cookie'];
+    if (cookieHeader) {
+      const cookies = cookieHeader.split(';').reduce((acc, cookie) => {
+        const [key, value] = cookie.trim().split('=');
+        acc[key] = decodeURIComponent(value || '');
+        return acc;
+      }, {});
+      token = cookies['auth_token'];
+    }
   }
 
   if (!token) {

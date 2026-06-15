@@ -2,7 +2,6 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
-const cookieParser = require('cookie-parser');
 require('dotenv').config();
 
 // Prevent unhandled rejections from killing the process
@@ -106,7 +105,6 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ limit: '2mb', extended: true }));
-app.use(cookieParser()); // Parse HTTP-Only cookies for mobile apps
 
 // Global rate limiters for different endpoint categories
 const generalLimiter = new RateLimiter('general', 100, 60000).middleware();
