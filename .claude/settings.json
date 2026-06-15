@@ -23,7 +23,8 @@
       "Bash(grep -nA15 \"update_last_seen\" socket.js)",
       "Bash(node --check routes/conversationMetadata.js)",
       "Bash(xargs grep -l \"pool\\\\|mysql.createPool\\\\|createConnection\")",
-      "Bash(node --check services/conversationMetadataService.js)"
+      "Bash(node --check services/conversationMetadataService.js)",
+      "Bash(grep -iv \"is_deleted\\\\|deleted_at\\\\|deleted_by\\\\|deletedAt\\\\|deletedBy\\\\|isDeleted\\\\|soft.del\\\\|message_deleted\\\\|DELETE /\\\\|// delet\\\\|console\")"
     ]
   }
 }

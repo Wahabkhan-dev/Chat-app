@@ -242,6 +242,21 @@ export function useSocket() {
     // ── Rejoin rooms on every (re)connect so group and DM events work after reconnects ──
     socket.on('connect', async () => {
       const s = stateRef.current;
+
+      // MOBILE FIX: On reconnect (especially after backgrounding), refresh token proactively
+      // to ensure it's still valid before making socket calls. This prevents 401 errors
+      // when the app was backgrounded and token may have aged (especially on older devices).
+      if (s.isAuthenticated) {
+        try {
+          const { api } = await import('@/lib/api');
+          await api.post('/auth/refresh', {});
+        } catch (err) {
+          // Token refresh failed — will force logout on next socket emit or API call
+          console.warn('[useSocket] token refresh failed on connect:', (err as Error).message);
+          return; // Don't try to rejoin rooms if token is invalid
+        }
+      }
+
       // Tell the server our current on-screen state as soon as we (re)connect.
       emitPresence();
       if (s.activeConversation?.type === 'dm' && s.currentUser?.id) {
@@ -848,13 +863,26 @@ export function useSocket() {
       }
     }, 30_000);
 
-    // Foreground: when the user switches back to the app, reconnect immediately
-    // rather than waiting for the next heartbeat tick.
+    // Foreground: when the user switches back to the app (especially on mobile after backgrounding),
+    // reconnect immediately and refresh the token if needed.
     const handleVisibility = async () => {
       // Report on-screen state on EVERY change (visible or hidden) so presence flips correctly
       // when the user leaves or returns to the app.
       emitPresence();
       if (document.visibilityState !== 'visible') return;
+
+      // MOBILE FIX: App may have been backgrounded for hours. Refresh token proactively
+      // before reconnecting socket so we don't get 401 on first socket emit.
+      if (stateRef.current.isAuthenticated) {
+        try {
+          const { api } = await import('@/lib/api');
+          await api.post('/auth/refresh', {});
+        } catch (err) {
+          // Token refresh failed — likely expired. Will force logout on next API call
+          console.warn('[useSocket] token refresh failed on foreground:', (err as Error).message);
+        }
+      }
+
       const sock = getSocket();
       if (!sock?.connected && stateRef.current.isAuthenticated) {
         sock?.connect();

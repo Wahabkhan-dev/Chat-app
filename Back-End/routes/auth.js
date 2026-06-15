@@ -10,6 +10,10 @@ require('dotenv').config();
 
 const router = express.Router();
 
+// JWT expiration — defaults to 10 years if not set in environment
+// This ensures sessions don't auto-logout until explicitly logged out
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '10y';
+
 function maskEmail(email) {
   const [local, domain] = email.split('@');
   if (!local || !domain) return email;
@@ -126,7 +130,7 @@ router.post('/verify-otp', async (req, res) => {
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN }
+      { expiresIn: JWT_EXPIRES_IN }
     );
 
     const sessionInfo = await createSession(user.id, token, {
@@ -237,7 +241,7 @@ router.post('/refresh', authenticateToken, async (req, res) => {
     const newToken = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN }
+      { expiresIn: JWT_EXPIRES_IN }
     );
 
     const sessionInfo = await createSession(user.id, newToken, {
