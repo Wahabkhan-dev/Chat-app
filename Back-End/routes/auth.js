@@ -10,7 +10,7 @@ require('dotenv').config();
 
 const router = express.Router();
 
-// JWT expiration — defaults to 10 years if not set in environment
+// JWT expiration — defaults to 10 years if not set in envifronment
 // This ensures sessions don't auto-logout until explicitly logged out
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '10y';
 
