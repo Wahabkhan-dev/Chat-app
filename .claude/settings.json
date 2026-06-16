@@ -28,7 +28,9 @@
       "Bash(npm start *)",
       "Bash(node -c routes/auth.js)",
       "Bash(node -c middleware/auth.js)",
-      "Bash(node -c server.js)"
+      "Bash(node -c server.js)",
+      "Bash(node -e ' *)",
+      "Bash(npx web-push *)"
     ]
   }
 }
