@@ -210,7 +210,7 @@ router.post('/', authenticateToken, upload.array('files', 10), async (req, res) 
           mimeType: file.mimetype,
         };
 
-        // Save metadata — non-fatal so a missing table never breaks the upload
+        // Save metadata — non-fatal so a missing table  never breaks the upload
         createFileMetadata(key, conversationId, userId, file.originalname, fileType, file.mimetype, file.size, originMessageId)
           .then(meta => console.log(`[upload] metadata saved — fileId=${meta.id}`))
           .catch(metaErr => console.error('[upload] metadata save failed (non-fatal):', metaErr.message));
