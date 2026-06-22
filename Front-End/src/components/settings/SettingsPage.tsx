@@ -118,7 +118,7 @@ const SettingsPage: React.FC = () => {
         return;
       }
 
-      // Step 3 — Service worker ready
+      // Step 3 — Service worker  ready
       console.log('[push] waiting for service worker...');
       const registration = await swReady();
       console.log('[push] service worker ready, scope:', registration.scope);
