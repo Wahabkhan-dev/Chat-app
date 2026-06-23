@@ -1,7 +1,7 @@
 const _rawUploadApiUrl = process.env.NEXT_PUBLIC_API_URL || '';
 const BASE_URL = _rawUploadApiUrl.startsWith('http')
   ? _rawUploadApiUrl
-  : 'https://chat-app-wv5a.onrender.com/api';
+  : 'https://chat-app-dzn1.onrender.com/api';
 
 export interface UploadedFileResult {
   key: string;       // R2 storage key — store this in the message; never a direct URL

@@ -4,7 +4,7 @@ import { getToken } from '@/lib/api';
 const _rawSocketApiUrl = process.env.NEXT_PUBLIC_API_URL || '';
 const _validApiUrl = _rawSocketApiUrl.startsWith('http')
   ? _rawSocketApiUrl
-  : 'https://chat-app-wv5a.onrender.com/api';
+  : 'https://chat-app-dzn1.onrender.com/api';
 const SOCKET_URL = _validApiUrl.replace(/\/api\/?$/, '');
 
 let socket: Socket | null = null;

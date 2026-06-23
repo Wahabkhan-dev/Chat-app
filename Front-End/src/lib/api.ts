@@ -1,7 +1,7 @@
 const _rawApiUrl = process.env.NEXT_PUBLIC_API_URL || '';
 const BASE_URL = _rawApiUrl.startsWith('http')
   ? _rawApiUrl
-  : 'https://chat-app-wv5a.onrender.com/api';
+  : 'https://chat-app-dzn1.onrender.com/api';
 
 /** Returns the resolved API base URL. Use this instead of reading NEXT_PUBLIC_API_URL directly. */
 export function getApiBaseUrl(): string {

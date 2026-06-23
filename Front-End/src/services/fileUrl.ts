@@ -7,7 +7,7 @@
 const _rawFileApiUrl = process.env.NEXT_PUBLIC_API_URL || '';
 const BASE_URL = _rawFileApiUrl.startsWith('http')
   ? _rawFileApiUrl
-  : 'https://chat-app-wv5a.onrender.com/api';
+  : 'https://chat-app-dzn1.onrender.com/api';
 const EVICT_BUFFER_MS = 30_000; // evict 30 s before expiry
 
 interface CacheEntry {
