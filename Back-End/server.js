@@ -91,7 +91,7 @@ const io = new Server(server, {
   cors: corsOptions,
   pingInterval: 25000,
   pingTimeout: 60000,
-  maxHttpBufferSize: 1e6, // 1MB
+  maxHttpBufferSize: 150 * 1024 * 1024, // 150MB
   transports: ['websocket', 'polling'],
 });
 
@@ -103,8 +103,8 @@ app.set('attachmentService', attachmentService);
 // Middleware
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ limit: '2mb', extended: true }));
+app.use(express.json({ limit: '150mb' }));
+app.use(express.urlencoded({ limit: '150mb', extended: true }));
 
 // Global rate limiters for different endpoint categories
 const generalLimiter = new RateLimiter('general', 100, 60000).middleware();

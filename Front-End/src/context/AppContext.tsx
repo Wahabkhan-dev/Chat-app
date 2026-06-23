@@ -165,6 +165,7 @@ interface AppState {
     isSearchActive: boolean;
     uploadedFiles: UploadedFile[];
     isUploading: boolean;
+    uploadProgress: number; // 0-100%
   };
   rightPanel: {
     open: boolean;
@@ -259,6 +260,7 @@ type AppAction =
   | { type: 'REMOVE_UPLOADED_FILE'; payload: number }
   | { type: 'CLEAR_UPLOADED_FILES' }
   | { type: 'SET_UPLOADING'; payload: boolean }
+  | { type: 'SET_UPLOAD_PROGRESS'; payload: number }
   | { type: 'RESTORE_CONVERSATION_META'; payload: Record<string, ConversationMeta> }
   | { type: 'LOAD_CONVERSATION_LIST'; payload: Array<{ conversationId: string; type: string; lastMessageAt: string | null; lastMessageContent: string; lastMessageSenderId: string }> }
   | { type: 'UPDATE_UNREAD_COUNTS'; payload: { counts: Record<string, number>; previews?: Record<string, { senderId: string; content: string; timestamp: string }> } }
@@ -294,6 +296,7 @@ const initialState: AppState = {
     isSearchActive: false,
     uploadedFiles: [],
     isUploading: false,
+    uploadProgress: 0,
   },
   rightPanel: {
     open: false,
@@ -1072,7 +1075,12 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
     case 'SET_UPLOADING':
       return {
         ...state,
-        chatUI: { ...state.chatUI, isUploading: action.payload }
+        chatUI: { ...state.chatUI, isUploading: action.payload, uploadProgress: action.payload ? 0 : 0 }
+      };
+    case 'SET_UPLOAD_PROGRESS':
+      return {
+        ...state,
+        chatUI: { ...state.chatUI, uploadProgress: action.payload }
       };
     case 'RESTORE_CONVERSATION_META':
       return {

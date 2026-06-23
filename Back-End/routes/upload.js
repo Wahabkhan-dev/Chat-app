@@ -19,7 +19,7 @@ const UPLOAD_ROOT = process.env.UPLOAD_ROOT
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 100 * 1024 * 1024, files: 20 },
+  limits: { fileSize: 150 * 1024 * 1024, files: 20 },
   fileFilter: (req, file, cb) => {
     // Only block path traversal attacks at this stage; size is enforced by limits above.
     // Full security validation (magic bytes etc.) runs after the buffer is available.

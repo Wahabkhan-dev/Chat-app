@@ -17,7 +17,7 @@ import { toast } from '@/hooks/use-toast';
 const COMMON_EMOJIS = ['😀', '😂', '😊', '😍', '👍', '🙌', '🔥', '✨', '🚀', '💡', '✅', '❌', '👋', '🎉', '🙏', '💯'];
 
 const MAX_FILES = 10;
-const MAX_FILE_SIZE_MB = 100;
+const MAX_FILE_SIZE_MB = 150;
 const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 function getFileIcon(filename: string): string {
@@ -276,7 +276,9 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
     if (uploadedFiles.length > 0) {
       dispatch({ type: 'SET_UPLOADING', payload: true });
       try {
-        r2Files = await uploadFilesToR2(uploadedFiles.map(f => f.file), activeConversation.id);
+        r2Files = await uploadFilesToR2(uploadedFiles.map(f => f.file), activeConversation.id, undefined, (percentage) => {
+          dispatch({ type: 'SET_UPLOAD_PROGRESS', payload: percentage });
+        });
       } catch (err: any) {
         dispatch({ type: 'SET_UPLOADING', payload: false });
         toast({

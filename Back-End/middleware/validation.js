@@ -117,8 +117,8 @@ function validateNumericId(paramName = 'id') {
  * SECURE UPLOAD VALIDATION
  */
 
-// File size limit: 100 MB per file
-const MAX_FILE_SIZE = 100 * 1024 * 1024;
+// File size limit: 150 MB per file
+const MAX_FILE_SIZE = 150 * 1024 * 1024;
 
 // FILE_SIZE_LIMITS kept for reference / future per-type enforcement
 const FILE_SIZE_LIMITS = {
@@ -152,9 +152,9 @@ function validateFileUpload(file) {
     return { valid: false, error: 'Invalid file name' };
   }
 
-  // Enforce 100 MB per-file limit (only meaningful when buffer is available; multer enforces it earlier)
+  // Enforce 150 MB per-file limit (only meaningful when buffer is available; multer enforces it earlier)
   if (file.size && file.size > MAX_FILE_SIZE) {
-    return { valid: false, error: 'File exceeds maximum size of 100 MB' };
+    return { valid: false, error: 'File exceeds maximum size of 150 MB' };
   }
 
   // Magic bytes check — only for declared image MIME types to prevent MIME spoofing

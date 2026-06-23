@@ -597,7 +597,7 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
       {state.chatUI.isUploading && (
         <div className="flex items-center gap-3 px-4 py-2.5 bg-primary/10 border-b border-primary/20 animate-in slide-in-from-top-1 z-10">
           <Loader2 className="h-4 w-4 text-primary animate-spin shrink-0" />
-          <p className="text-sm text-primary font-medium flex-1">Uploading files — please wait…</p>
+          <p className="text-sm text-primary font-medium flex-1">Uploading files — {state.chatUI.uploadProgress}% please wait…</p>
         </div>
       )}
 
