@@ -261,7 +261,7 @@ router.post('/copy', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/files/url?key=... — returns public R2 URL or presigned URL
+// GET /api/files/url?key=... — returns a presigned R2 URL for private preview/download
 router.get('/url', authenticateToken, async (req, res) => {
   const key = req.query.key;
   if (!isValidKey(key)) return res.status(400).json({ message: 'Invalid file key.' });
@@ -271,16 +271,9 @@ router.get('/url', authenticateToken, async (req, res) => {
     return res.status(e.status || 500).json({ message: e.message || 'Server error.' });
   }
 
-  // If R2_PUBLIC_URL is configured, return direct public URL
-  if (process.env.R2_PUBLIC_URL) {
-    const publicUrl = `${process.env.R2_PUBLIC_URL}/${key}`;
-    return res.json({ url: publicUrl, expiresIn: null, expiresAt: null, isPublic: true });
-  }
-
-  // Otherwise, return presigned URL (short-lived, falls back to /serve proxy on error)
   try {
     const signedUrl = await generateSignedUrl(key, SIGNED_URL_EXPIRY);
-    res.json({ url: signedUrl, expiresIn: SIGNED_URL_EXPIRY, expiresAt: Date.now() + SIGNED_URL_EXPIRY * 1000 });
+    res.json({ url: signedUrl, expiresIn: SIGNED_URL_EXPIRY, expiresAt: Date.now() + SIGNED_URL_EXPIRY * 1000, isPublic: false });
   } catch (err) {
     console.error('[files] presign failed, returning serve URL:', err.message);
     const rawToken = (req.headers.authorization || '').replace('Bearer ', '');
