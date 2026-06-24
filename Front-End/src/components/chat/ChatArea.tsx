@@ -69,6 +69,9 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const loadingOlderRef = useRef(false);
   const hasMoreOlderRef = useRef(true); // Until we get < 50 messages, assume more exist
+  // Stores scroll metrics captured just before an older-message prepend so the
+  // layout effect below can restore the user's exact reading position (no jump).
+  const prependRestoreRef = useRef<{ prevScrollHeight: number; prevScrollTop: number } | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
@@ -113,6 +116,12 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     // useLayoutEffect always runs before useEffect, so isLoadingMessages (set in useEffect)
     // is always stale here. This ref bridges that gap.
     fetchPendingRef.current = !apiLoadedConversations.current.has(activeConversationId);
+    // Reset older-message pagination state for the newly opened conversation.
+    // Without this, scrolling to the top of one chat (which sets hasMoreOlderRef=false)
+    // would permanently block older-message loading in every other chat.
+    hasMoreOlderRef.current = true;
+    loadingOlderRef.current = false;
+    prependRestoreRef.current = null;
   }, [activeConversationId]);
 
   // Load message history + join socket room whenever conversation changes
@@ -140,7 +149,7 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     apiLoadedConversations.current.add(activeConversationId);
     setIsLoadingMessages(true);
 
-    api.get<{ messages: any[] }>(`/messages/${activeConversationId}?limit=100`)
+    api.get<{ messages: any[] }>(`/messages/${activeConversationId}?limit=50`)
       .then(({ messages }) => {
         dispatch({ type: 'LOAD_MESSAGES', payload: { conversationId: activeConversationId, messages } });
         const pinned = messages.find((m: any) => m.isPinned);
@@ -226,16 +235,10 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
 
     const handleScroll = async () => {
       const scrollTop = scrollRef.current!.scrollTop;
-      const scrollHeight = scrollRef.current!.scrollHeight;
-      const clientHeight = scrollRef.current!.clientHeight;
 
-      // Load more if:
-      // 1. User scrolled up (scrollTop < 200px)
-      // 2. NOT already loading
-      // 3. More messages exist
-      // 4. Fewer than 50 messages above scroll position (user scrolled past the middle)
-      const messagesAboveScroll = Math.ceil((scrollTop / scrollHeight) * rawMessages.length);
-      if (scrollTop > 200 || loadingOlderRef.current || !hasMoreOlderRef.current || messagesAboveScroll > 50) {
+      // Trigger when the user is within 150px of the very top, not already
+      // fetching, and the backend may still have older messages to give.
+      if (scrollTop > 150 || loadingOlderRef.current || !hasMoreOlderRef.current) {
         return;
       }
 
@@ -245,24 +248,28 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
       loadingOlderRef.current = true;
       setIsLoadingOlder(true);
 
+      // Capture scroll metrics BEFORE the prepend so we can restore the exact
+      // reading position after older messages are added above (no scroll jump).
+      const prevScrollHeight = scrollRef.current!.scrollHeight;
+      const prevScrollTop = scrollRef.current!.scrollTop;
+
       try {
-        // Load 100 messages at a time (not 50) to prevent constant reloading
+        const OLDER_BATCH = 50;
         const { messages } = await api.get<{ messages: any[] }>(
-          `/messages/${activeConversationId}?before=${oldestMessage.id}&limit=100`
+          `/messages/${activeConversationId}?before=${oldestMessage.id}&limit=${OLDER_BATCH}`
         );
 
         if (messages.length === 0) {
-          // No more messages, user reached the beginning
+          // Reached the very beginning of the conversation — nothing older exists.
           hasMoreOlderRef.current = false;
-        } else if (messages.length < 100) {
-          // Got fewer than 100, must be at the beginning
-          hasMoreOlderRef.current = false;
-          dispatch({
-            type: 'PREPEND_MESSAGES',
-            payload: { conversationId: activeConversationId, messages },
-          });
         } else {
-          // Got full 100, more may exist
+          // A short batch means this was the last (oldest) page.
+          if (messages.length < OLDER_BATCH) {
+            hasMoreOlderRef.current = false;
+          }
+          // Signal the layout effect to restore scroll position after React
+          // commits the prepended messages to the DOM.
+          prependRestoreRef.current = { prevScrollHeight, prevScrollTop };
           dispatch({
             type: 'PREPEND_MESSAGES',
             payload: { conversationId: activeConversationId, messages },
@@ -279,6 +286,20 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     scrollRef.current.addEventListener('scroll', handleScroll);
     return () => scrollRef.current?.removeEventListener('scroll', handleScroll);
   }, [activeConversationId, rawMessages]);
+
+  // After older messages are prepended, restore the scroll position so the user
+  // stays anchored to the same message they were reading (WhatsApp behaviour).
+  // useLayoutEffect runs before the browser paints, so the adjustment is invisible:
+  // new scrollTop = (growth in height from the prepended messages) + old scrollTop.
+  useLayoutEffect(() => {
+    if (!prependRestoreRef.current || !scrollRef.current) return;
+    const { prevScrollHeight, prevScrollTop } = prependRestoreRef.current;
+    prependRestoreRef.current = null;
+    const newScrollHeight = scrollRef.current.scrollHeight;
+    scrollRef.current.style.scrollBehavior = 'auto';
+    scrollRef.current.scrollTop = newScrollHeight - prevScrollHeight + prevScrollTop;
+    scrollRef.current.style.scrollBehavior = '';
+  }, [rawMessages]);
 
   const filteredMessages = useMemo(() => {
     if (!state.chatUI.isSearchActive || !state.chatUI.searchQuery) return rawMessages;
