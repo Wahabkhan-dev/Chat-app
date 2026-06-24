@@ -72,6 +72,57 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
+// ── Web Share Target — receive files/text shared from other apps ──────────────
+// The PWA manifest points share_target.action at "/share-target" with a POST
+// multipart body. A client page cannot read a POST body, so we intercept it here:
+// stash the shared files + text into the Cache Storage, then redirect to the
+// client picker page which reads the stash and forwards it to a chat.
+const SHARE_CACHE = 'mawby-share-target';
+
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  const url = new URL(request.url);
+
+  if (request.method === 'POST' && url.pathname === '/share-target') {
+    event.respondWith((async () => {
+      try {
+        const formData = await request.formData();
+        const cache = await caches.open(SHARE_CACHE);
+
+        const files = formData.getAll('files').filter((f) => f && typeof f.size === 'number');
+        const meta = {
+          title: formData.get('title') || '',
+          text: formData.get('text') || '',
+          url: formData.get('url') || '',
+          fileCount: files.length,
+          fileNames: [],
+          fileTypes: [],
+        };
+
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          meta.fileNames.push(file.name || `shared-${i}`);
+          meta.fileTypes.push(file.type || 'application/octet-stream');
+          await cache.put(
+            `/__shared_file_${i}`,
+            new Response(file, { headers: { 'Content-Type': file.type || 'application/octet-stream' } })
+          );
+        }
+
+        await cache.put(
+          '/__shared_meta',
+          new Response(JSON.stringify(meta), { headers: { 'Content-Type': 'application/json' } })
+        );
+      } catch (err) {
+        // Swallow — still redirect so the page can show an empty/error state gracefully.
+      }
+      // 303 forces the follow-up request to be a GET navigation to the picker page.
+      // Response.redirect requires an absolute URL in several browsers.
+      return Response.redirect(new URL('/share-target?received=1', self.location.origin).toString(), 303);
+    })());
+  }
+});
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
 
