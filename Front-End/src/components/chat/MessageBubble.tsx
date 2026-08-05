@@ -7,15 +7,19 @@ import { useAppContext } from '@/context/AppContext';
 import { cn } from '@/lib/utils';
 import { Avatar } from '../ui/avatar';
 import { format } from 'date-fns';
-import { Reply, Forward, SmilePlus, Edit2, Trash2, MoreHorizontal, Check, X, Ban, Pin, CheckCheck, Clock, Undo2, Copy } from 'lucide-react';
+import { Reply, Forward, SmilePlus, Edit2, Trash2, MoreHorizontal, Check, X, Ban, Pin, CheckCheck, Clock, Undo2, Copy, Share2 } from 'lucide-react';
 import { getSocket } from '@/services/socket';
 import { api } from '@/lib/api';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { copyToClipboard } from '@/lib/utils';
+import { getServeUrl } from '@/services/fileUrl';
 import FileRenderer from './FileRenderer';
 import LinkPreviewCard from './LinkPreviewCard';
+
+const canNativeShare = typeof navigator !== 'undefined' && !!navigator.share;
 
 // ─── Inline content parser: URLs, emails, mentions, bold ─────────────────────
 
@@ -58,12 +62,14 @@ function parseSegments(text: string): Segment[] {
 // Inline URL chip with individual copy button
 const UrlLink: React.FC<{ raw: string; display: string; isMe: boolean }> = ({ raw, display, isMe }) => {
   const [copied, setCopied] = useState(false);
-  const handleCopy = (e: React.MouseEvent) => {
+  const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    navigator.clipboard.writeText(raw);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const ok = await copyToClipboard(raw);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
   return (
     <span className="inline-flex items-center gap-0.5 align-baseline max-w-full min-w-0 overflow-hidden">
@@ -91,12 +97,14 @@ const UrlLink: React.FC<{ raw: string; display: string; isMe: boolean }> = ({ ra
 // Inline email chip with individual copy button
 const EmailLink: React.FC<{ email: string; isMe: boolean }> = ({ email, isMe }) => {
   const [copied, setCopied] = useState(false);
-  const handleCopy = (e: React.MouseEvent) => {
+  const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    navigator.clipboard.writeText(email);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const ok = await copyToClipboard(email);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
   return (
     <span className="inline-flex items-center gap-0.5 align-baseline">
@@ -229,6 +237,37 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
   const handleUndoDelete = () => {
     dispatch({ type: 'UNDO_DELETE', payload: { conversationId: activeConversationId, messageId: message.id } });
     getSocket()?.emit('undelete_message', { messageId: message.id, conversationId: activeConversationId });
+  };
+
+  const handleCopyText = async () => {
+    const text = (message.content || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1');
+    const ok = await copyToClipboard(text);
+    dispatch({ type: 'ADD_TOAST', payload: { message: ok ? 'Copied to clipboard!' : 'Copy failed', type: ok ? 'success' : 'error' } });
+  };
+
+  const handleShareMessage = async () => {
+    try {
+      if (message.files && message.files.length > 0) {
+        const filesToShare = (await Promise.all(message.files.map(async (f) => {
+          const fetchUrl = f.key ? getServeUrl(f.key) : f.url;
+          if (!fetchUrl) return null;
+          const res = await fetch(fetchUrl, { credentials: 'include' });
+          if (!res.ok) return null;
+          const blob = await res.blob();
+          return new File([blob], f.name, { type: blob.type || 'application/octet-stream' });
+        }))).filter((f): f is File => f !== null);
+
+        if (filesToShare.length > 0 && navigator.canShare?.({ files: filesToShare })) {
+          await navigator.share({ files: filesToShare, text: message.content || undefined });
+          return;
+        }
+      }
+      await navigator.share({ text: message.content || 'Shared a message' });
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        dispatch({ type: 'ADD_TOAST', payload: { message: 'Share failed', type: 'error' } });
+      }
+    }
   };
 
   const handlePin = () => {
@@ -407,7 +446,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
 
         {!isEditing && (
           <div className={cn(
-            "flex items-center gap-1 mb-1 opacity-0 group-hover/msg:opacity-100 transition-all bg-card border rounded-xl p-1 shadow-xl z-10 scale-95 group-hover/msg:scale-100",
+            "flex items-center gap-1 mb-1 opacity-100 scale-100 sm:opacity-0 sm:scale-95 sm:group-hover/msg:opacity-100 sm:group-hover/msg:scale-100 transition-all bg-card border rounded-xl p-1 shadow-xl z-10",
             isMe ? "mr-1" : "ml-1"
           )}>
             <Popover>
@@ -436,9 +475,14 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
                 <DropdownMenuItem className="gap-2 py-2.5 font-medium" onClick={() => dispatch({ type: 'SET_FORWARDING_MESSAGE', payload: message })}>
                   <Forward className="h-4 w-4 text-muted-foreground" /> Forward
                 </DropdownMenuItem>
-                <DropdownMenuItem className="gap-2 py-2.5 font-medium" onClick={() => { navigator.clipboard.writeText((message.content || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1')); dispatch({ type: 'ADD_TOAST', payload: { message: 'Copied to clipboard!', type: 'success' } }); }}>
-                  <MoreHorizontal className="h-4 w-4 text-muted-foreground" /> Copy Text
+                <DropdownMenuItem className="gap-2 py-2.5 font-medium" onClick={handleCopyText}>
+                  <Copy className="h-4 w-4 text-muted-foreground" /> Copy Text
                 </DropdownMenuItem>
+                {canNativeShare && (
+                  <DropdownMenuItem className="gap-2 py-2.5 font-medium" onClick={handleShareMessage}>
+                    <Share2 className="h-4 w-4 text-muted-foreground" /> Share
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem className="gap-2 py-2.5 font-medium" onClick={handlePin}>
                   <Pin className="h-4 w-4 text-muted-foreground" /> {message.isPinned ? 'Unpin Message' : 'Pin Message'}
@@ -617,11 +661,11 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
         >
           <button
             className="w-full px-4 py-2 flex items-center gap-2 hover:bg-muted text-sm font-medium text-foreground transition-colors"
-            onClick={() => {
+            onClick={async () => {
               const selection = window.getSelection();
               if (selection && !selection.isCollapsed) {
-                navigator.clipboard.writeText(selection.toString());
-                dispatch({ type: 'ADD_TOAST', payload: { message: 'Text copied', type: 'success' } });
+                const ok = await copyToClipboard(selection.toString());
+                dispatch({ type: 'ADD_TOAST', payload: { message: ok ? 'Text copied' : 'Copy failed', type: ok ? 'success' : 'error' } });
               }
               setTextCtxMenu(null);
             }}

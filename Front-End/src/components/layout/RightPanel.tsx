@@ -33,7 +33,7 @@ function getFileIconPath(filename: string): string {
 import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { cn, copyToClipboard } from '@/lib/utils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Label } from '@/components/ui/label';
@@ -675,9 +675,9 @@ const RightPanel: React.FC = () => {
 
               <div className="mt-8 flex flex-col gap-3 overflow-hidden">
                 <div className="flex gap-3">
-                  <Button variant="outline" className="flex-1 rounded-xl h-11 border-border" onClick={() => {
-                    navigator.clipboard.writeText(user?.email || '');
-                    dispatch({ type: 'ADD_TOAST', payload: { message: 'Email copied to clipboard!', type: 'success' } });
+                  <Button variant="outline" className="flex-1 rounded-xl h-11 border-border" onClick={async () => {
+                    const ok = await copyToClipboard(user?.email || '');
+                    dispatch({ type: 'ADD_TOAST', payload: { message: ok ? 'Email copied to clipboard!' : 'Copy failed', type: ok ? 'success' : 'error' } });
                   }}>Copy Email</Button>
                 </div>
                 <Button 

@@ -7,7 +7,7 @@ import { MessageFile } from '@/mock/messages';
 import { Button } from '@/components/ui/button';
 import {
   Download, X, ZoomIn, AlertCircle, Plus, Minus,
-  ChevronLeft, ChevronRight, Loader2, Copy,
+  ChevronLeft, ChevronRight, Loader2, Copy, Share2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSignedUrl } from '@/hooks/useSignedUrl';
@@ -16,6 +16,7 @@ import { downloadFile, getServeUrl, copyImageToClipboard } from '@/services/file
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.25;
+const canNativeShare = typeof navigator !== 'undefined' && !!navigator.share;
 
 function getFileIcon(filename: string): string {
   const ext = (filename.split('.').pop() || '').toLowerCase();
@@ -337,6 +338,27 @@ const FilePreviewModal: React.FC = () => {
     }
   };
 
+  const handleShareFile = async () => {
+    if (!currentFile) return;
+    const fetchUrl = currentFile.key ? getServeUrl(currentFile.key) : imageCopyUrl;
+    if (!fetchUrl) return;
+    try {
+      const res = await fetch(fetchUrl, { credentials: 'include' });
+      if (!res.ok) throw new Error('Could not fetch file');
+      const blob = await res.blob();
+      const file = new File([blob], currentFile.name, { type: blob.type || 'application/octet-stream' });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: currentFile.name });
+      } else {
+        await navigator.share({ title: currentFile.name, url: fetchUrl });
+      }
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        dispatch({ type: 'ADD_TOAST', payload: { message: 'Share failed', type: 'error' } });
+      }
+    }
+  };
+
   const handleCopyImage = async () => {
     if (!currentFile) return;
     const fetchUrl = currentFile.key ? getServeUrl(currentFile.key) : imageCopyUrl;
@@ -382,13 +404,16 @@ const FilePreviewModal: React.FC = () => {
         onClick={e => e.stopPropagation()}
       >
         {/* ── Header ── */}
-        <div className="px-5 py-3 flex items-center justify-between border-b border-border shrink-0 bg-card/80 backdrop-blur-sm">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="p-1.5 bg-muted rounded-lg border border-border/40 shadow-sm shrink-0">
-              {getIcon()}
-            </div>
+        <div className="px-5 py-3 flex items-center gap-3 border-b border-border shrink-0 bg-card/80 backdrop-blur-sm">
+          <div className="p-1.5 bg-muted rounded-lg border border-border/40 shadow-sm shrink-0">
+            {getIcon()}
+          </div>
+
+          {/* Name + meta, immediately followed by the action buttons — grouped together so
+              they read as one unit, with Close pinned alone on the far right */}
+          <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
             <div className="min-w-0">
-              <h3 className="text-sm font-bold truncate max-w-[160px] md:max-w-sm">{currentFile.name}</h3>
+              <h3 className="text-sm font-bold truncate max-w-[140px] sm:max-w-[160px] md:max-w-sm">{currentFile.name}</h3>
               <div className="flex items-center gap-1.5">
                 <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-widest">
                   {currentIndex + 1} of {items.length}
@@ -399,38 +424,52 @@ const FilePreviewModal: React.FC = () => {
                 </span>
               </div>
             </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {isImage && (
+
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              {isImage && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 rounded-xl border-border flex px-2 sm:px-3 font-bold text-xs"
+                  onClick={handleCopyImage}
+                  title="Copy image to clipboard"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Copy</span>
+                </Button>
+              )}
+              {canNativeShare && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 rounded-xl border-border flex px-2 sm:px-3 font-bold text-xs"
+                  onClick={handleShareFile}
+                  title="Share to other apps"
+                >
+                  <Share2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Share</span>
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 gap-1.5 rounded-xl border-border hidden sm:flex font-bold text-xs"
-                onClick={handleCopyImage}
-                title="Copy image to clipboard"
+                className="h-8 gap-1.5 rounded-xl border-border flex px-2 sm:px-3 font-bold text-xs"
+                onClick={handleDownload}
+                disabled={downloading}
               >
-                <Copy className="h-3.5 w-3.5" />
-                Copy
+                {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                <span className="hidden sm:inline">Download</span>
               </Button>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1.5 rounded-xl border-border hidden sm:flex font-bold text-xs"
-              onClick={handleDownload}
-              disabled={downloading}
-            >
-              {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-              Download
-            </Button>
-            <button
-              onClick={handleClose}
-              title="Close (Esc)"
-              className="p-2 hover:bg-muted rounded-full text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <X className="h-4.5 w-4.5" />
-            </button>
+            </div>
           </div>
+
+          <button
+            onClick={handleClose}
+            title="Close (Esc)"
+            className="p-2 hover:bg-muted rounded-full text-muted-foreground hover:text-foreground transition-colors shrink-0"
+          >
+            <X className="h-4.5 w-4.5" />
+          </button>
         </div>
 
         {/* ── Image / file content ── */}

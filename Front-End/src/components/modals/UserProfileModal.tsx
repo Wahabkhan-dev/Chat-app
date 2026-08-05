@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Mail, Building, Calendar, MessageSquare, Shield } from 'lucide-react';
 import { format } from 'date-fns';
 import { User } from '@/mock/users';
+import { copyToClipboard } from '@/lib/utils';
 
 const UserProfileModal: React.FC = () => {
   const { state, dispatch } = useAppContext();
@@ -97,9 +98,9 @@ const UserProfileModal: React.FC = () => {
           <Button 
             variant="outline" 
             className="flex-1 rounded-xl h-12 font-bold border-border"
-            onClick={() => {
-              navigator.clipboard.writeText(user.email);
-              dispatch({ type: 'ADD_TOAST', payload: { message: 'Email copied to clipboard!', type: 'success' } });
+            onClick={async () => {
+              const ok = await copyToClipboard(user.email);
+              dispatch({ type: 'ADD_TOAST', payload: { message: ok ? 'Email copied to clipboard!' : 'Copy failed', type: ok ? 'success' : 'error' } });
             }}
           >
             Copy Email
