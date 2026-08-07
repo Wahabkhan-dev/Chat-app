@@ -1,7 +1,7 @@
 ﻿
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Message } from '@/mock/messages';
 import { useAppContext } from '@/context/AppContext';
 import { cn } from '@/lib/utils';
@@ -161,6 +161,10 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
   const [expanded, setExpanded] = useState(false);
   const [textCtxMenu, setTextCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [hoveredReactionEmoji, setHoveredReactionEmoji] = useState<string | null>(null);
+  // Long-press (touch) support so anyone — reacted or not — can view who reacted
+  // without that first tap also toggling their own reaction.
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFired = useRef(false);
   const isMe = String(message.senderId) === String(state.currentUser?.id);
   const isAdmin = state.currentUser?.role === 'admin';
   const sender = state.users.find(u => String(u.id) === String(message.senderId));
@@ -580,7 +584,24 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
                 >
                   <button
                     data-reaction-emoji={r.emoji}
-                    onClick={(e) => { e.stopPropagation(); handleReaction(r.emoji); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      // A long-press already opened the "who reacted" view — that tap
+                      // shouldn't also toggle the reaction on release.
+                      if (longPressFired.current) { longPressFired.current = false; return; }
+                      handleReaction(r.emoji);
+                    }}
+                    onTouchStart={() => {
+                      if (!isGroup) return;
+                      longPressFired.current = false;
+                      longPressTimer.current = setTimeout(() => {
+                        longPressFired.current = true;
+                        setHoveredReactionEmoji(r.emoji);
+                      }, 450);
+                    }}
+                    onTouchEnd={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+                    onTouchMove={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
+                    onContextMenu={(e) => { if (isGroup) { e.preventDefault(); setHoveredReactionEmoji(r.emoji); } }}
                     className={cn(
                       "px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1.5 border transition-all hover:scale-110",
                       hasReacted ? "bg-primary/20 border-primary text-primary font-bold" : "bg-muted border-border text-muted-foreground hover:bg-muted/80"
@@ -590,11 +611,15 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
                     {r.users.length > 1 && <span>{r.users.length}</span>}
                   </button>
 
-                  {/* Popover showing who reacted — using fixed position to avoid parent overflow clipping */}
+                  {/* Popover showing who reacted — using fixed position to avoid parent overflow clipping.
+                      Any group member can open this, whether or not they reacted themselves. */}
                   {hoveredReactionEmoji === r.emoji && reactedUsers.length > 0 && (() => {
                     const rect = document.querySelector(`[data-reaction-emoji="${r.emoji}"]`)?.getBoundingClientRect();
                     if (!rect) return null;
                     return (
+                      <>
+                      {/* Full-screen catcher so a tap outside (mobile, no mouseleave) closes the popover */}
+                      <div className="fixed inset-0 z-40" onClick={() => setHoveredReactionEmoji(null)} />
                       <div
                         className="fixed z-50 bg-card border border-border rounded-xl shadow-2xl p-3 min-w-[240px] max-w-[320px]"
                         style={{
@@ -641,6 +666,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
                           ))}
                         </div>
                       </div>
+                      </>
                     );
                   })()}
                 </div>
