@@ -29,6 +29,7 @@ import ConfirmModal from '../modals/ConfirmModal';
 import ForwardMessageModal from '../modals/ForwardMessageModal';
 import FilePreviewModal from '../modals/FilePreviewModal';
 import LeaveGroupModal from '../modals/LeaveGroupModal';
+import MessageInfoModal from '../modals/MessageInfoModal';
 import { Toaster } from '../ui/toaster';
 import { ErrorBoundary } from '../ErrorBoundary';
 
@@ -370,6 +371,7 @@ const AppShell: React.FC = () => {
       <FilePreviewModal />
       <LeaveGroupModal />
       <ForwardMessageModal />
+      <MessageInfoModal />
 
       <Toaster />
       <PushPermissionBanner />

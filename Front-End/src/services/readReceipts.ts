@@ -5,6 +5,11 @@ export interface ReadReceipt {
   readAt: string;
 }
 
+export interface DeliveryReceipt {
+  userId: string;
+  deliveredAt: string;
+}
+
 export function markMessageRead(messageId: string, conversationId: string): void {
   const socket = getSocket();
   if (!socket) return;
@@ -31,6 +36,26 @@ export function getMessageReadReceipts(
       callback(response.reads || []);
     } else {
       console.error('[ReadReceipts] Get reads failed:', response?.error);
+      callback([]);
+    }
+  });
+}
+
+export function getMessageDeliveryReceipts(
+  messageId: string,
+  callback: (deliveries: DeliveryReceipt[]) => void
+): void {
+  const socket = getSocket();
+  if (!socket) {
+    callback([]);
+    return;
+  }
+
+  socket.emit('get_message_deliveries', { messageId }, (response: any) => {
+    if (response?.success) {
+      callback(response.deliveries || []);
+    } else {
+      console.error('[ReadReceipts] Get deliveries failed:', response?.error);
       callback([]);
     }
   });

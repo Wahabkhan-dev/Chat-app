@@ -7,7 +7,7 @@ import { useAppContext } from '@/context/AppContext';
 import { cn } from '@/lib/utils';
 import { Avatar } from '../ui/avatar';
 import { format } from 'date-fns';
-import { Reply, Forward, SmilePlus, Edit2, Trash2, MoreHorizontal, Check, X, Ban, Pin, CheckCheck, Clock, Undo2, Copy, Share2 } from 'lucide-react';
+import { Reply, Forward, SmilePlus, Edit2, Trash2, MoreHorizontal, Check, X, Ban, Pin, CheckCheck, Clock, Undo2, Copy, Share2, Info } from 'lucide-react';
 import { getSocket } from '@/services/socket';
 import { api } from '@/lib/api';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -487,6 +487,14 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
                 <DropdownMenuItem className="gap-2 py-2.5 font-medium" onClick={handlePin}>
                   <Pin className="h-4 w-4 text-muted-foreground" /> {message.isPinned ? 'Unpin Message' : 'Pin Message'}
                 </DropdownMenuItem>
+                {isMe && state.activeConversation?.type === 'group' && (
+                  <DropdownMenuItem
+                    className="gap-2 py-2.5 font-medium"
+                    onClick={() => dispatch({ type: 'OPEN_MODAL', payload: { type: 'messageInfo', data: { message } } })}
+                  >
+                    <Info className="h-4 w-4 text-muted-foreground" /> Message Info
+                  </DropdownMenuItem>
+                )}
                 {(isMe || isAdmin) && (
                   <>
                     <DropdownMenuSeparator />
@@ -561,11 +569,12 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
           <div className={cn("flex flex-wrap gap-1 mt-1.5", isMe ? "justify-end" : "justify-start")}>
             {message.reactions.map((r, i) => {
               const hasReacted = r.users.includes(state.currentUser?.id || '');
+              const isGroup = state.activeConversation?.type === 'group';
               const reactedUsers = state.users.filter(u => r.users.includes(u.id));
               return (
                 <div
                   key={i}
-                  onMouseEnter={() => setHoveredReactionEmoji(r.emoji)}
+                  onMouseEnter={() => isGroup && setHoveredReactionEmoji(r.emoji)}
                   onMouseLeave={() => setHoveredReactionEmoji(null)}
                   className="relative inline-block"
                 >

@@ -13,6 +13,19 @@ interface ModalProps {
   maxWidth?: string;
 }
 
+// Tailwind's JIT scanner only picks up class names that appear literally in source —
+// a template-built string like `lg:${maxWidth}` never matches anything at build time,
+// so the desktop cap has to be selected from this static lookup instead.
+const LG_MAX_WIDTH_CLASSES: Record<string, string> = {
+  'max-w-sm': 'lg:max-w-sm',
+  'max-w-md': 'lg:max-w-md',
+  'max-w-lg': 'lg:max-w-lg',
+  'max-w-xl': 'lg:max-w-xl',
+  'max-w-2xl': 'lg:max-w-2xl',
+  'max-w-3xl': 'lg:max-w-3xl',
+  'max-w-4xl': 'lg:max-w-4xl',
+};
+
 const Modal: React.FC<ModalProps> = ({ isOpen, onClose, children, title, maxWidth = 'max-w-md' }) => {
   useEffect(() => {
     if (!isOpen) return;
@@ -84,8 +97,9 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, children, title, maxWidt
           'max-h-[95dvh] md:max-h-[90vh]',
           // tablet (768px–1023px): centered, 90% wide, capped at 600px
           'md:w-[90%] md:max-w-[600px]',
-          // desktop (1024px+): auto width, maxWidth prop takes over
-          `lg:w-auto lg:${maxWidth}`,
+          // desktop (1024px+): fills up to the requested cap instead of shrink-wrapping content
+          'lg:w-full',
+          LG_MAX_WIDTH_CLASSES[maxWidth] || 'lg:max-w-md',
         )}
         onClick={(e) => e.stopPropagation()}
       >

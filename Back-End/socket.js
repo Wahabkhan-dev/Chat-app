@@ -1065,6 +1065,27 @@ socket.on('typing', async ({ conversationId }) => {
       }
     });
 
+    // Get delivery status for a message (per-user, mirrors get_message_reads)
+    socket.on('get_message_deliveries', async ({ messageId }, callback) => {
+      try {
+        const [deliveries] = await pool.query(
+          'SELECT user_id, delivered_at FROM message_deliveries WHERE message_id = ?',
+          [messageId]
+        );
+
+        callback?.({
+          success: true,
+          deliveries: deliveries.map((d) => ({
+            userId: String(d.user_id),
+            deliveredAt: d.delivered_at instanceof Date ? d.delivered_at.toISOString() : String(d.delivered_at),
+          })),
+        });
+      } catch (err) {
+        console.error('[get_message_deliveries] error:', err);
+        callback?.({ success: false, error: 'Server error' });
+      }
+    });
+
     // Notify sender when a recipient has received the message from the server
     socket.on('message_received', async ({ messageId, conversationId }, callback) => {
       try {

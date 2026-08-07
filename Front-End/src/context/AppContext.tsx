@@ -16,7 +16,7 @@ import { setupCrossTabSync } from '@/services/session';
 export type AppView = 'chat' | 'admin' | 'files' | 'settings';
 export type ConversationType = 'dm' | 'group';
 export type ThemePreference = 'light' | 'dark' | 'system';
-export type ModalType = 'createGroup' | 'createUser' | 'editUser' | 'addMember' | 'confirm' | 'editGroup' | 'userProfile' | 'blockUser' | 'kickMember' | 'leaveGroup' | 'transferOwnership' | null;
+export type ModalType = 'createGroup' | 'createUser' | 'editUser' | 'addMember' | 'confirm' | 'editGroup' | 'userProfile' | 'blockUser' | 'kickMember' | 'leaveGroup' | 'transferOwnership' | 'messageInfo' | null;
 
 export interface ActiveConversation {
   type: ConversationType;
