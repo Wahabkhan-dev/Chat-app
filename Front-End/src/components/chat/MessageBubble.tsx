@@ -1,7 +1,7 @@
 ﻿
 "use client";
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Message } from '@/mock/messages';
 import { useAppContext } from '@/context/AppContext';
 import { cn } from '@/lib/utils';
@@ -160,11 +160,32 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
   const [editText, setEditText] = useState(message.content);
   const [expanded, setExpanded] = useState(false);
   const [textCtxMenu, setTextCtxMenu] = useState<{ x: number; y: number } | null>(null);
-  const [hoveredReactionEmoji, setHoveredReactionEmoji] = useState<string | null>(null);
+  // Anchored to the specific pill's own rect (captured at trigger time) rather than
+  // a global DOM query — with repeated emoji across messages, a page-wide selector
+  // can match a different message's pill and anchor the popover off-screen.
+  const [hoveredReaction, setHoveredReaction] = useState<{ emoji: string; top: number; left: number } | null>(null);
   // Long-press (touch) support so anyone — reacted or not — can view who reacted
   // without that first tap also toggling their own reaction.
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFired = useRef(false);
+
+  // Close the "who reacted" popover on an outside tap/click — a full-screen
+  // overlay would sit on top of the pill and steal the hover state, causing
+  // it to flicker open/closed, so a plain document listener is used instead.
+  useEffect(() => {
+    if (!hoveredReaction) return;
+    const handleOutside = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('[data-reaction-emoji]') || target.closest('[data-reaction-popover]')) return;
+      setHoveredReaction(null);
+    };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside);
+    };
+  }, [hoveredReaction]);
   const isMe = String(message.senderId) === String(state.currentUser?.id);
   const isAdmin = state.currentUser?.role === 'admin';
   const sender = state.users.find(u => String(u.id) === String(message.senderId));
@@ -575,15 +596,21 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
               const hasReacted = r.users.includes(state.currentUser?.id || '');
               const isGroup = state.activeConversation?.type === 'group';
               const reactedUsers = state.users.filter(u => r.users.includes(u.id));
+              const pillKey = `${message.id}:${r.emoji}`;
+              const isOpen = hoveredReaction?.emoji === pillKey;
+              const captureRect = (el: HTMLElement) => {
+                const rect = el.getBoundingClientRect();
+                setHoveredReaction({ emoji: pillKey, top: rect.bottom, left: rect.left + rect.width / 2 });
+              };
               return (
                 <div
                   key={i}
-                  onMouseEnter={() => isGroup && setHoveredReactionEmoji(r.emoji)}
-                  onMouseLeave={() => setHoveredReactionEmoji(null)}
+                  onMouseEnter={(e) => isGroup && captureRect(e.currentTarget)}
+                  onMouseLeave={() => setHoveredReaction(null)}
                   className="relative inline-block"
                 >
                   <button
-                    data-reaction-emoji={r.emoji}
+                    data-reaction-emoji={pillKey}
                     onClick={(e) => {
                       e.stopPropagation();
                       // A long-press already opened the "who reacted" view — that tap
@@ -591,17 +618,18 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
                       if (longPressFired.current) { longPressFired.current = false; return; }
                       handleReaction(r.emoji);
                     }}
-                    onTouchStart={() => {
+                    onTouchStart={(e) => {
                       if (!isGroup) return;
                       longPressFired.current = false;
+                      const btn = e.currentTarget;
                       longPressTimer.current = setTimeout(() => {
                         longPressFired.current = true;
-                        setHoveredReactionEmoji(r.emoji);
+                        captureRect(btn);
                       }, 450);
                     }}
                     onTouchEnd={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
                     onTouchMove={() => { if (longPressTimer.current) clearTimeout(longPressTimer.current); }}
-                    onContextMenu={(e) => { if (isGroup) { e.preventDefault(); setHoveredReactionEmoji(r.emoji); } }}
+                    onContextMenu={(e) => { if (isGroup) { e.preventDefault(); captureRect(e.currentTarget); } }}
                     className={cn(
                       "px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1.5 border transition-all hover:scale-110",
                       hasReacted ? "bg-primary/20 border-primary text-primary font-bold" : "bg-muted border-border text-muted-foreground hover:bg-muted/80"
@@ -611,20 +639,17 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
                     {r.users.length > 1 && <span>{r.users.length}</span>}
                   </button>
 
-                  {/* Popover showing who reacted — using fixed position to avoid parent overflow clipping.
+                  {/* Popover showing who reacted — anchored to this exact pill's own rect.
                       Any group member can open this, whether or not they reacted themselves. */}
-                  {hoveredReactionEmoji === r.emoji && reactedUsers.length > 0 && (() => {
-                    const rect = document.querySelector(`[data-reaction-emoji="${r.emoji}"]`)?.getBoundingClientRect();
-                    if (!rect) return null;
+                  {isOpen && reactedUsers.length > 0 && (() => {
+                    const { top, left } = hoveredReaction!;
                     return (
-                      <>
-                      {/* Full-screen catcher so a tap outside (mobile, no mouseleave) closes the popover */}
-                      <div className="fixed inset-0 z-40" onClick={() => setHoveredReactionEmoji(null)} />
                       <div
+                        data-reaction-popover
                         className="fixed z-50 bg-card border border-border rounded-xl shadow-2xl p-3 min-w-[240px] max-w-[320px]"
                         style={{
-                          top: `${rect.bottom + 8}px`,
-                          left: `${Math.max(8, Math.min(rect.left + rect.width / 2 - 120, window.innerWidth - 328))}px`,
+                          top: `${top + 8}px`,
+                          left: `${Math.max(8, Math.min(left - 120, window.innerWidth - 328))}px`,
                         }}
                       >
                         <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3">
@@ -647,7 +672,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
                                   payload: { type: 'dm', id: dmId, name: user.name, avatar: user.avatar }
                                 });
                                 dispatch({ type: 'SET_ACTIVE_VIEW', payload: 'chat' });
-                                setHoveredReactionEmoji(null);
+                                setHoveredReaction(null);
                               }}
                               className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-muted transition-colors cursor-pointer text-left"
                             >
@@ -666,7 +691,6 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
                           ))}
                         </div>
                       </div>
-                      </>
                     );
                   })()}
                 </div>
