@@ -493,7 +493,9 @@ function setupSocket(io, optimizationService) {
               badge: '/fav-1.webp',
               conversationId,
               conversationType: conversationId.startsWith('dm_') ? 'dm' : 'group',
-              url: '/',
+              // Deep link so a cold-started tab (no existing client to postMessage) still opens
+              // straight into this conversation — read by useSocket.ts on load.
+              url: `/?conversation=${encodeURIComponent(conversationId)}`,
             };
             for (const recipientId of notifyRecipients) {
               // Skip push for muted recipients
