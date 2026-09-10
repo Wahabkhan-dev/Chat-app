@@ -19,8 +19,6 @@ export function useSocket() {
   const loadedOnce = useRef(false); // true after first loadData() completes
   const lastSyncAt = useRef(0); // throttle syncMissedMessages against reconnect/focus churn
   const lastActiveRefetchAt = useRef(0); // throttle open-conversation refetch on reconnect/focus
-  // Deep link from a clicked push notification, queued until loadData() resolves user/group names
-  const pendingDeepLinkConv = useRef<{ id: string; type: 'dm' | 'group' } | null>(null);
 
   useEffect(() => {
     if (!state.isAuthenticated || initialized.current) return;
@@ -66,32 +64,6 @@ export function useSocket() {
         dispatch({ type: 'LOAD_MESSAGES', payload: { conversationId: activeId, messages } });
       } catch {
         // best-effort; the sidebar badge still reflects the unread via syncMissedMessages
-      }
-    };
-
-    // Jump straight to the sender's conversation when a background push notification is
-    // clicked. Name resolution (SET_ACTIVE_CONVERSATION) needs state.users/state.groups, which
-    // aren't populated until loadData() finishes — so this applies immediately once loaded, or
-    // queues into pendingDeepLinkConv until then.
-    const applyConversationDeepLink = (conversationId: string, conversationType: 'dm' | 'group') => {
-      dispatch({
-        type: 'SET_ACTIVE_CONVERSATION',
-        payload: { type: conversationType, id: conversationId, name: conversationId, avatar: null },
-      });
-      if (conversationType === 'dm') {
-        const parts = conversationId.split('_');
-        const otherId = parts.find(p => p !== String(stateRef.current.currentUser?.id));
-        if (otherId) getSocket()?.emit('join_dm', { otherUserId: otherId });
-      }
-    };
-
-    const openConversationFromNotification = (conversationId?: string | null, conversationType?: string | null) => {
-      if (!conversationId) return;
-      const type: 'dm' | 'group' = conversationType === 'group' ? 'group' : 'dm';
-      if (loadedOnce.current) {
-        applyConversationDeepLink(conversationId, type);
-      } else {
-        pendingDeepLinkConv.current = { id: conversationId, type };
       }
     };
 
@@ -251,40 +223,12 @@ export function useSocket() {
         } catch { /* best-effort */ }
 
         loadedOnce.current = true; // initial load done — future connects are reconnects
-        if (pendingDeepLinkConv.current) {
-          const { id, type } = pendingDeepLinkConv.current;
-          pendingDeepLinkConv.current = null;
-          applyConversationDeepLink(id, type);
-        }
       } catch (err) {
         console.error('Failed to load initial data:', err);
       }
     };
 
     loadData();
-
-    // Already-open tab: the service worker posts this when a background notification is clicked,
-    // so the app jumps to that conversation without reloading.
-    const handleSwMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'OPEN_CONVERSATION') {
-        openConversationFromNotification(event.data.conversationId, event.data.conversationType);
-      }
-    };
-    if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.addEventListener('message', handleSwMessage);
-    }
-
-    // Cold start: app opened fresh from a notification click — the deep link is in the URL.
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const deepLinkConvId = params.get('conversation');
-      if (deepLinkConvId) {
-        openConversationFromNotification(deepLinkConvId, deepLinkConvId.startsWith('dm_') ? 'dm' : 'group');
-        params.delete('conversation');
-        const query = params.toString();
-        window.history.replaceState({}, '', window.location.pathname + (query ? `?${query}` : '') + window.location.hash);
-      }
-    }
 
     // STRICT presence: report whether the app is currently on-screen. The server marks the user
     // online only while at least one of their tabs/devices is visible.
@@ -971,9 +915,6 @@ export function useSocket() {
       clearInterval(heartbeatTimer);
       clearInterval(inactivityRefreshTimer);
       document.removeEventListener('visibilitychange', handleVisibility);
-      if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
-        navigator.serviceWorker.removeEventListener('message', handleSwMessage);
-      }
       // Remove all event listeners before disconnecting so no handler fires
       // on the stale socket instance if the component remounts quickly.
       getSocket()?.offAny();
