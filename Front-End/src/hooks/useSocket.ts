@@ -863,6 +863,16 @@ export function useSocket() {
       }
     }, 30_000);
 
+    // Inactivity auto-refresh: while the tab is backgrounded/inactive, socket events can be
+    // missed silently (throttled timers, suspended connections, etc.), so poll for missed
+    // messages every 30 s as a fallback. Skipped while visible — real-time socket events cover
+    // that case and refetchActiveConversation() already refreshes the open thread on refocus.
+    const inactivityRefreshTimer = setInterval(() => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') return;
+      if (!stateRef.current.isAuthenticated) return;
+      syncMissedMessages();
+    }, 30_000);
+
     // Foreground: when the user switches back to the app (especially on mobile after backgrounding),
     // reconnect immediately and refresh the token if needed.
     const handleVisibility = async () => {
@@ -903,6 +913,7 @@ export function useSocket() {
     return () => {
       initialized.current = false;
       clearInterval(heartbeatTimer);
+      clearInterval(inactivityRefreshTimer);
       document.removeEventListener('visibilitychange', handleVisibility);
       // Remove all event listeners before disconnecting so no handler fires
       // on the stale socket instance if the component remounts quickly.
