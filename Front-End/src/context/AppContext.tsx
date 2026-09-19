@@ -207,6 +207,10 @@ type AppAction =
   | { type: 'REMOVE_GROUP_MEMBER'; payload: { groupId: string; userId: string; systemMessage: Message } }
   | { type: 'UPDATE_GROUP_SETTINGS'; payload: { groupId: string; settings: any } }
   | { type: 'SEND_MESSAGE'; payload: { conversationId: string; message: Message } }
+  // Optimistic send: replace the local "sending" copy (matched by clientKey) with the saved message
+  | { type: 'CONFIRM_MESSAGE'; payload: { conversationId: string; clientKey: string; message: Message } }
+  // Optimistic send failed: remove the local "sending" copy
+  | { type: 'REMOVE_PENDING_MESSAGE'; payload: { conversationId: string; clientKey: string } }
   | { type: 'EDIT_MESSAGE'; payload: { conversationId: string; messageId: string; newContent: string; editedAt: string } }
   | { type: 'DELETE_MESSAGE'; payload: { conversationId: string; messageId: string; deletedBy: string; deletedAt: string } }
   | { type: 'SET_MESSAGE_STATUS'; payload: { conversationId: string; messageId: string; status: Message['status'] } }
@@ -306,6 +310,55 @@ const initialState: AppState = {
   },
   drafts: {},
 };
+
+/** Shared-files / links entries for a message, with stable IDs (matching LOAD_MESSAGES) so dedup checks catch them. */
+function buildSharedEntries(message: Message, conversationId: string): SharedFile[] {
+  const newFiles: SharedFile[] = (message.files || []).map(f => ({
+    id: `f_${message.id}_${f.key || f.name}`,
+    name: f.name,
+    size: f.size || '',
+    type: f.type,
+    key: f.key,
+    uploadedBy: message.senderId,
+    conversationId: conversationId,
+    timestamp: message.timestamp,
+    previewUrl: f.url,
+  }));
+
+  const urlRegex = /(https?:\/\/[^\s<>"]+)/g;
+  const contentUrls = [...new Set((message.content || '').match(urlRegex) || [])];
+  const urlLinks: SharedFile[] = contentUrls.map(url => {
+    let domain = '';
+    try { domain = new URL(url).hostname.replace('www.', ''); } catch { /* ignore */ }
+    return {
+      id: `l_${message.id}_${url}`,
+      name: url,
+      size: domain,
+      type: 'link' as const,
+      uploadedBy: message.senderId,
+      conversationId: conversationId,
+      timestamp: message.timestamp,
+      previewUrl: url,
+    };
+  });
+
+  // Stable IDs for message.links; urlLinks that aren't in message.links are appended
+  const newLinks: SharedFile[] = [
+    ...(message.links || []).map((l: any) => ({
+      id: `l_${message.id}_${l.url}`,
+      name: l.title || l.url,
+      size: l.domain,
+      type: 'link' as const,
+      uploadedBy: message.senderId,
+      conversationId: conversationId,
+      timestamp: message.timestamp,
+      previewUrl: l.url,
+    })),
+    ...urlLinks.filter(ul => !(message.links || []).some((l: any) => l.url === ul.previewUrl)),
+  ];
+
+  return [...newFiles, ...newLinks];
+}
 
 const appReducer = (state: AppState, action: AppAction): AppState => {
   switch (action.type) {
@@ -581,6 +634,28 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         ...state,
         groups: state.groups.map(g => g.id === action.payload.groupId ? { ...g, settings: { ...g.settings, ...action.payload.settings } } : g)
       };
+    case 'CONFIRM_MESSAGE': {
+      const { conversationId, clientKey, message } = action.payload;
+      const list = state.messages[conversationId] || [];
+      // The saved copy may already have arrived via the socket broadcast and replaced the pending one
+      if (!list.some(m => m.clientKey === clientKey && m.status === 'sending')) return state;
+      if (list.some(m => m.id === message.id)) {
+        return { ...state, messages: { ...state.messages, [conversationId]: list.filter(m => m.clientKey !== clientKey || m.id === message.id) } };
+      }
+      return {
+        ...state,
+        messages: {
+          ...state.messages,
+          [conversationId]: list.map(m => m.clientKey === clientKey ? { ...message, clientKey, status: message.status || 'sent' } : m),
+        },
+        sharedFiles: [...state.sharedFiles, ...buildSharedEntries(message, conversationId).filter(nf => !state.sharedFiles.some(e => e.id === nf.id))],
+      };
+    }
+    case 'REMOVE_PENDING_MESSAGE': {
+      const { conversationId, clientKey } = action.payload;
+      const list = state.messages[conversationId] || [];
+      return { ...state, messages: { ...state.messages, [conversationId]: list.filter(m => !(m.clientKey === clientKey && m.status === 'sending')) } };
+    }
     case 'SEND_MESSAGE': {
       const { conversationId, message } = action.payload;
       // Deduplicate — same message can arrive via room broadcast AND personal room
@@ -591,6 +666,25 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
       // Increment unread only when this conversation is not the one currently open
       const isActiveConv = state.activeConversation?.id === conversationId;
       const isOwnMessage = String(message.senderId) === String(state.currentUser?.id);
+      const isPendingLocal = message.status === 'sending' && !!message.clientKey;
+
+      // Our own message coming back from the server before the send ack: swap it in place of
+      // the pending local copy (oldest matching one) so it doesn't show twice.
+      if (isOwnMessage && !isPendingLocal) {
+        const pendingIdx = existing.findIndex(m =>
+          m.status === 'sending' && !!m.clientKey && (m.content || '') === (message.content || '')
+        );
+        if (pendingIdx !== -1) {
+          const pending = existing[pendingIdx];
+          const replaced = existing.slice();
+          replaced[pendingIdx] = { ...message, clientKey: pending.clientKey, status: message.status || 'sent' };
+          return {
+            ...state,
+            messages: { ...state.messages, [conversationId]: replaced },
+            sharedFiles: [...state.sharedFiles, ...buildSharedEntries(message, conversationId).filter(nf => !state.sharedFiles.some(e => e.id === nf.id))],
+          };
+        }
+      }
       const newUnreadCount = (isActiveConv || isOwnMessage) ? 0 : (meta.unreadCount || 0) + 1;
 
       // Detect if current user is @mentioned (direct mention or @everyone in a group)
@@ -607,53 +701,9 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
       // Strip @[Name](id) → @Name for display in preview
       const displayContent = (message.content || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1');
 
-      // Stable IDs (matching LOAD_MESSAGES pattern) so subsequent dedup checks can catch these
-      const newFiles: SharedFile[] = (message.files || []).map(f => ({
-        id: `f_${message.id}_${f.key || f.name}`,
-        name: f.name,
-        size: f.size || '',
-        type: f.type,
-        key: f.key,
-        uploadedBy: message.senderId,
-        conversationId: conversationId,
-        timestamp: message.timestamp,
-        previewUrl: f.url,
-      }));
-
-      const urlRegex = /(https?:\/\/[^\s<>"]+)/g;
-      const contentUrls = [...new Set((message.content || '').match(urlRegex) || [])];
-      const urlLinks: SharedFile[] = contentUrls.map(url => {
-        let domain = '';
-        try { domain = new URL(url).hostname.replace('www.', ''); } catch { /* ignore */ }
-        return {
-          id: `l_${message.id}_${url}`,
-          name: url,
-          size: domain,
-          type: 'link' as const,
-          uploadedBy: message.senderId,
-          conversationId: conversationId,
-          timestamp: message.timestamp,
-          previewUrl: url,
-        };
-      });
-
-      // Stable IDs for message.links; urlLinks that aren't in message.links are appended
-      const newLinks: SharedFile[] = [
-        ...(message.links || []).map((l: any) => ({
-          id: `l_${message.id}_${l.url}`,
-          name: l.title || l.url,
-          size: l.domain,
-          type: 'link' as const,
-          uploadedBy: message.senderId,
-          conversationId: conversationId,
-          timestamp: message.timestamp,
-          previewUrl: l.url,
-        })),
-        ...urlLinks.filter(ul => !(message.links || []).some((l: any) => l.url === ul.previewUrl)),
-      ];
-
-      // Dedup: skip any entry whose ID already exists in sharedFiles
-      const incomingShared = [...newFiles, ...newLinks].filter(
+      // Dedup: skip any entry whose ID already exists in sharedFiles. A pending local copy has a
+      // temporary id, so its files/links are added when the saved message replaces it.
+      const incomingShared = isPendingLocal ? [] : buildSharedEntries(message, conversationId).filter(
         nf => !state.sharedFiles.some(existing => existing.id === nf.id)
       );
 
@@ -674,8 +724,9 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
             },
           },
         },
-        replyingTo: null,
-        chatUI: { ...state.chatUI, uploadedFiles: [] }
+        // Only our own send clears the reply bar and attachments — an incoming message must not
+        // wipe what the user is composing
+        ...(isOwnMessage ? { replyingTo: null, chatUI: { ...state.chatUI, uploadedFiles: [] } } : {}),
       };
     }
     case 'EDIT_MESSAGE':

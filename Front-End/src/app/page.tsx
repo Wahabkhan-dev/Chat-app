@@ -12,8 +12,7 @@ export default function Home() {
   const { state, dispatch } = useAppContext();
   const [checking, setChecking] = useState(true);
 
-  // On first load, chreck if there's a saved session
-  
+  // On first load, check if there's a saved session
   useEffect(() => {
     const restoreSession = async () => {
       const user = await getCurrentUser();

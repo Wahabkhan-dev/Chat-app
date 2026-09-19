@@ -4,7 +4,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAppContext } from '@/context/AppContext';
 import { updateSetting } from '@/services/settings';
-import { User, Palette, Save, Loader2, Monitor, Moon, Sun, Globe, Camera, Bell, BellOff, CheckCircle2, Send } from 'lucide-react';
+import { User, Palette, Save, Loader2, Monitor, Moon, Sun, Globe, Camera, Bell, BellOff, CheckCircle2, Send, RefreshCw, Timer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,6 +15,14 @@ import { toast } from '@/hooks/use-toast';
 import { Avatar } from '../ui/avatar';
 import { cn } from '@/lib/utils';
 import { getApiBaseUrl, getToken } from '@/lib/api';
+import { AUTO_REFRESH_INTERVAL_MS, useAutoRefreshCountdown } from '@/hooks/useAutoRefresh';
+
+function formatCountdown(ms: number): string {
+  const totalSeconds = Math.ceil(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -43,6 +51,8 @@ const SettingsPage: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isAdmin = state.currentUser?.role === 'admin';
+  const refreshRemaining = useAutoRefreshCountdown();
+  const refreshElapsedPct = Math.min(100, 100 - (refreshRemaining / AUTO_REFRESH_INTERVAL_MS) * 100);
 
   const [profileData, setProfileData] = useState({
     department: state.currentUser?.department || '',
@@ -269,6 +279,39 @@ const SettingsPage: React.FC = () => {
         <div className="mb-6 md:mb-8">
           <h1 className="text-2xl md:text-3xl font-bold font-headline text-foreground tracking-tight">Workspace Settings</h1>
           <p className="text-muted-foreground mt-1 text-sm font-medium">Manage your account preferences and workspace experience.</p>
+        </div>
+
+        <div className="bg-card rounded-2xl border border-border shadow-sm p-4 md:p-6 mb-4 md:mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="flex items-center gap-3 md:gap-4 flex-1 min-w-0">
+              <div className="p-2 bg-primary/10 rounded-lg shrink-0">
+                <Timer className="h-5 w-5 text-primary" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold">Auto Refresh</h3>
+                <p className="text-xs text-muted-foreground font-medium">
+                  The app refreshes every 30 minutes to stay up to date.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-2xl font-bold tabular-nums text-foreground" aria-live="polite">
+                {formatCountdown(refreshRemaining)}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.location.reload()}
+                className="rounded-xl h-9 px-4 font-bold gap-2 border-border hover:bg-primary/5 hover:text-primary"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Refresh now
+              </Button>
+            </div>
+          </div>
+          <div className="mt-4 h-1.5 w-full rounded-full bg-muted overflow-hidden">
+            <div className="h-full bg-primary transition-[width] duration-1000 ease-linear" style={{ width: `${refreshElapsedPct}%` }} />
+          </div>
         </div>
 
         <Tabs defaultValue="profile" className="space-y-4 md:space-y-6">

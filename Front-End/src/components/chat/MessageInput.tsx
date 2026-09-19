@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import React, { useState, useRef, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { useAppContext } from '@/context/AppContext';
 import { Paperclip, Send, Smile, X, CornerDownRight, AtSign, Lock, ShieldAlert, Plus, Search, FileText, File as FileIcon, Play, Video, LogOut, UserX, ClipboardPaste } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,9 +15,19 @@ import { getSocket } from '@/services/socket';
 import { uploadFilesToR2 } from '@/services/upload';
 import { toast } from '@/hooks/use-toast';
 
-const COMMON_EMOJIS = ['😀', '😂', '😊', '😍', '👍', '🙌', '🔥', '✨', '🚀', '💡', '✅', '❌', '👋', '🎉', '🙏', '💯'];
+// Full emoji picker, loaded only when first opened
+const EmojiPicker = dynamic(() => import('./EmojiPicker'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-[min(340px,calc(100vw-32px))] h-[380px] rounded-2xl bg-card border border-border flex items-center justify-center">
+      <div className="h-6 w-6 border-2 border-muted-foreground/30 border-t-primary rounded-full animate-spin" />
+    </div>
+  ),
+});
 
 const MAX_FILES = 10;
+// If the server hasn't confirmed a sent message by now, it's treated as not sent
+const SEND_ACK_TIMEOUT_MS = 20_000;
 const MAX_FILE_SIZE_MB = 150;
 const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
 
@@ -265,11 +276,72 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
     const socket = getSocket();
     if (!socket?.connected) return;
 
-    setIsSending(true);
-
+    const rawText = inputText;
     const content = processMentions(inputText.trim());
     pendingMentions.current = [];
     const replyTo = state.replyingTo?.id;
+
+    // Text-only messages are shown instantly (WhatsApp-style) with a clock icon, then swapped
+    // for the saved copy when the server confirms. Messages with files wait for the upload.
+    if (uploadedFiles.length === 0 && state.currentUser) {
+      const conversationId = activeConversation.id;
+      const clientKey = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      dispatch({
+        type: 'SEND_MESSAGE',
+        payload: {
+          conversationId,
+          message: {
+            id: clientKey,
+            clientKey,
+            senderId: String(state.currentUser.id),
+            content,
+            timestamp: new Date().toISOString(),
+            type: 'text',
+            reactions: [],
+            replyTo,
+            status: 'sending',
+          },
+        },
+      });
+
+      let settled = false;
+      const failSend = () => {
+        if (settled) return;
+        settled = true;
+        dispatch({ type: 'REMOVE_PENDING_MESSAGE', payload: { conversationId, clientKey } });
+        // Give the text back so nothing is lost (only if the box is still empty)
+        setInputText(current => (current.trim() ? current : rawText));
+        toast({ title: 'Message not sent', description: 'Check your connection and try again.', variant: 'destructive' });
+      };
+      const ackTimeout = setTimeout(failSend, SEND_ACK_TIMEOUT_MS);
+
+      socket.emit(
+        'send_message',
+        { conversationId, content, type: 'text', replyTo, files: [] },
+        (ack: { success: boolean; message?: any }) => {
+          clearTimeout(ackTimeout);
+          if (settled) return;
+          if (ack?.success && ack.message) {
+            settled = true;
+            dispatch({ type: 'CONFIRM_MESSAGE', payload: { conversationId, clientKey, message: { ...ack.message, files: [] } } });
+          } else {
+            failSend();
+          }
+        }
+      );
+
+      socket.emit('stop_typing', { conversationId });
+      deleteDraft(conversationId);
+      socket.emit('clear_draft', { conversationId });
+      if (draftTimer.current) clearTimeout(draftTimer.current);
+
+      setInputText('');
+      dispatch({ type: 'SET_REPLYING_TO', payload: null });
+      textareaRef.current?.focus();
+      return;
+    }
+
+    setIsSending(true);
 
     // Upload files to Cloudflare R2 before emitting the socket event
     let r2Files: { key: string; name: string; size: string; type: string; mimeType?: string }[] = [];
@@ -403,10 +475,10 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
       const text = inputText;
       const newText = text.substring(0, start) + emoji + text.substring(end);
       setInputText(newText);
-      
-      // Set focus back and move cursor
+
+      // Move the cursor after the emoji without focusing the textarea — focusing would close
+      // the picker (so only one emoji could be picked) and pop up the keyboard on mobile.
       setTimeout(() => {
-        textarea.focus();
         textarea.setSelectionRange(start + emoji.length, start + emoji.length);
       }, 0);
     } else {
@@ -662,19 +734,8 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
                     <Smile className="h-4 w-4" />
                   </button>
                 </PopoverTrigger>
-                <PopoverContent side="top" align="start" className="w-[280px] p-2 bg-card border border-border shadow-2xl rounded-2xl z-[var(--z-popover)]">
-                  <div className="grid grid-cols-6 gap-1">
-                    {COMMON_EMOJIS.map(emoji => (
-                      <button
-                        key={emoji}
-                        type="button"
-                        onClick={() => handleEmojiSelect(emoji)}
-                        className="h-9 w-9 flex items-center justify-center text-xl rounded-lg hover:bg-muted transition-colors"
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                  </div>
+                <PopoverContent side="top" align="start" className="w-auto p-0 bg-transparent border-none shadow-2xl rounded-2xl z-[var(--z-popover)]">
+                  <EmojiPicker onSelect={handleEmojiSelect} />
                 </PopoverContent>
               </Popover>
 

@@ -114,6 +114,30 @@
   border-radius: 9999px;
 }
 
+/* Emoji picker (emoji-picker-react) — app theme colors and Google (Noto) emojis.
+   The extra class names out-rank the library's own light/dark theme rules. */
+.app-emoji-picker .EmojiPickerReact.epr-main {
+  --epr-bg-color: hsl(var(--card));
+  --epr-category-label-bg-color: hsl(var(--card) / 0.95);
+  --epr-text-color: hsl(var(--foreground));
+  --epr-hover-bg-color: hsl(var(--muted));
+  --epr-focus-bg-color: hsl(var(--primary) / 0.15);
+  --epr-highlight-color: hsl(var(--primary));
+  --epr-search-input-bg-color: hsl(var(--muted));
+  --epr-search-input-bg-color-active: hsl(var(--muted));
+  --epr-search-border-color: hsl(var(--primary));
+  --epr-picker-border-color: hsl(var(--border));
+  --epr-skin-tone-picker-menu-color: hsl(var(--card));
+  border-radius: 1rem;
+}
+.app-emoji-picker .EmojiPickerReact .epr-emoji-native {
+  font-family: "Noto Color Emoji", sans-serif !important;
+}
+.app-emoji-picker .EmojiPickerReact .epr-body {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--primary) / 0.5) hsl(var(--muted));
+}
+
 /* Themed chat scrollbar — uses primary color, fades when idle */
 .scrollbar-chat {
   scrollbar-width: thin;

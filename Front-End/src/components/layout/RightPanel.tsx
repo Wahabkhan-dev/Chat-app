@@ -6,7 +6,8 @@ import { api, getApiBaseUrl, getToken } from '@/lib/api';
 import { useAppContext } from '@/context/AppContext';
 import { setConversationBlockStatus, emitConversationMetadataChanged, muteConversation, unmuteConversation } from '@/services/conversationMetadata';
 import { useSignedUrl } from '@/hooks/useSignedUrl';
-import { getSignedUrl, downloadFile } from '@/services/fileUrl';
+import { getSignedUrl } from '@/services/fileUrl';
+import { startDownload, useDownloads } from '@/services/downloadManager';
 import { Avatar } from '../ui/avatar';
 import {
   X, Mail, Building, Calendar, FileIcon,
@@ -15,7 +16,7 @@ import {
   BellOff, ExternalLink, Image as ImageIcon, Camera,
   Search, Grid, List, ArrowLeft, ArrowRight,
   MessageSquare, Settings, Save, Shield,
-  Radio, VolumeX, CheckCircle2, ChevronDown, UserCircle
+  Radio, VolumeX, CheckCircle2, ChevronDown, UserCircle, Eye
 } from 'lucide-react';
 
 function getFileIconPath(filename: string): string {
@@ -43,23 +44,19 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 
 
-// Sub-component: "View" button — resolves signed URL then opens in a new tab
-const ViewFileButton: React.FC<{ fileKey: string; fileName: string }> = ({ fileKey, fileName }) => {
-  const [opening, setOpening] = useState(false);
-  const handleView = async () => {
-    setOpening(true);
-    try {
-      const url = await getSignedUrl(fileKey);
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } catch {
-      // silently ignore
-    } finally {
-      setOpening(false);
-    }
+// Sub-component: "View" button — opens the file in the in-app preview. Opening the raw
+// file in a new tab would auto-download formats the browser can't display (Word, Excel, …).
+const ViewFileButton: React.FC<{ fileKey: string; fileName: string; fileType?: string; fileSize?: string }> = ({ fileKey, fileName, fileType, fileSize }) => {
+  const { dispatch } = useAppContext();
+  const handleView = () => {
+    dispatch({
+      type: 'OPEN_GALLERY',
+      payload: { items: [{ key: fileKey, name: fileName, type: (fileType || 'document') as any, size: fileSize || '' }], index: 0 },
+    });
   };
   return (
-    <Button variant="ghost" size="sm" className="h-7 text-[9px] font-bold uppercase tracking-wider gap-1" disabled={opening} onClick={handleView}>
-      {opening ? <div className="h-3 w-3 border-2 border-muted-foreground/30 border-t-primary rounded-full animate-spin" /> : <ExternalLink className="h-3 w-3" />}
+    <Button variant="ghost" size="sm" className="h-7 text-[9px] font-bold uppercase tracking-wider gap-1" onClick={handleView}>
+      <Eye className="h-3 w-3" />
       View
     </Button>
   );
@@ -111,7 +108,8 @@ const RightPanel: React.FC = () => {
   const [editingName, setEditingName] = useState('');
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [editingDescription, setEditingDescription] = useState('');
-  const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
+  const { items: downloads } = useDownloads();
+  const isItemDownloading = (key?: string) => !!key && downloads.some(d => d.status === 'downloading' && d.source.key === key);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [panelWidth, setPanelWidth] = useState(320);
   const [isMobile, setIsMobile] = useState(false);
@@ -402,16 +400,8 @@ const RightPanel: React.FC = () => {
     setIsEditingDescription(false);
   };
 
-  const handleDownloadFile = async (id: string, key: string | undefined, fileName: string) => {
-    if (!key) return;
-    setDownloadingIds(prev => new Set(prev).add(id));
-    try {
-      await downloadFile(key, fileName);
-    } catch {
-      dispatch({ type: 'ADD_TOAST', payload: { message: `Failed to download ${fileName}`, type: 'error' } });
-    } finally {
-      setDownloadingIds(prev => { const s = new Set(prev); s.delete(id); return s; });
-    }
+  const handleDownloadFile = (key: string | undefined, url: string | undefined, fileName: string) => {
+    startDownload({ name: fileName, key: key || undefined, url: key ? undefined : url });
   };
 
   const renderTabContent = () => {
@@ -875,11 +865,11 @@ const RightPanel: React.FC = () => {
                         <p className="text-[10px] text-muted-foreground">{item.fileSize} • {format(new Date(item.timestamp), 'MMM d')}</p>
                       </div>
                       <button
-                        disabled={downloadingIds.has(item.id)}
+                        disabled={isItemDownloading(item.key)}
                         className="p-1.5 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary transition-all disabled:opacity-50"
-                        onClick={() => handleDownloadFile(item.id, item.key, item.fileName)}
+                        onClick={() => handleDownloadFile(item.key, item.url, item.fileName)}
                       >
-                        {downloadingIds.has(item.id) ? <div className="h-4 w-4 border-2 border-muted-foreground/30 border-t-primary rounded-full animate-spin" /> : <Download className="h-4 w-4" />}
+                        {isItemDownloading(item.key) ? <div className="h-4 w-4 border-2 border-muted-foreground/30 border-t-primary rounded-full animate-spin" /> : <Download className="h-4 w-4" />}
                       </button>
                     </div>
                   ))}
@@ -924,21 +914,21 @@ const RightPanel: React.FC = () => {
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-bold truncate">{file.fileName}</p>
                         <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-tight">
-                          {file.fileSize} â€¢ {format(new Date(file.timestamp), 'MMM d, yyyy')}
+                          {file.fileSize} • {format(new Date(file.timestamp), 'MMM d, yyyy')}
                         </p>
                       </div>
                     </div>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <Button
                         variant="ghost" size="sm" className="h-7 text-[9px] font-bold uppercase tracking-wider gap-1"
-                        disabled={downloadingIds.has(file.id)}
-                        onClick={() => handleDownloadFile(file.id, file.key, file.fileName)}
+                        disabled={isItemDownloading(file.key)}
+                        onClick={() => handleDownloadFile(file.key, file.url, file.fileName)}
                       >
-                        {downloadingIds.has(file.id) ? <div className="h-3 w-3 border-2 border-muted-foreground/30 border-t-primary rounded-full animate-spin" /> : <Download className="h-3 w-3" />}
+                        {isItemDownloading(file.key) ? <div className="h-3 w-3 border-2 border-muted-foreground/30 border-t-primary rounded-full animate-spin" /> : <Download className="h-3 w-3" />}
                         Download
                       </Button>
                       {file.key && (
-                        <ViewFileButton fileKey={file.key} fileName={file.fileName} />
+                        <ViewFileButton fileKey={file.key} fileName={file.fileName} fileType={file.fileType} fileSize={file.fileSize} />
                       )}
                       <Button variant="ghost" size="sm" className="h-7 text-[9px] font-bold uppercase tracking-wider gap-1" onClick={() => handleJumpToMessage(file.id)}>
                         <MessageSquare className="h-3 w-3" /> Jump

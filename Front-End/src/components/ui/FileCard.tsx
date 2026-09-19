@@ -1,14 +1,14 @@
 
 "use client";
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Download, Eye, Loader2 } from 'lucide-react';
 import { FileType } from '@/mock/messages';
 import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { useAppContext } from '@/context/AppContext';
-import { downloadFile } from '@/services/fileUrl';
+import { startDownload, useIsDownloading } from '@/services/downloadManager';
 
 function getFileIconPath(filename: string): string {
   const ext = (filename.split('.').pop() || '').toLowerCase();
@@ -36,7 +36,7 @@ interface FileCardProps {
 }
 
 const FileCard: React.FC<FileCardProps> = ({ name, type, size, previewUrl, fileKey, className, showActionsInBubble, messageId, onView }) => {
-  const [isDownloading, setIsDownloading] = useState(false);
+  const isDownloading = useIsDownloading({ key: fileKey, url: fileKey ? undefined : previewUrl });
   const { dispatch } = useAppContext();
 
   const getIcon = () => (
@@ -52,26 +52,12 @@ const FileCard: React.FC<FileCardProps> = ({ name, type, size, previewUrl, fileK
     }
   };
 
-  const handleDownload = async () => {
+  const handleDownload = () => {
     if (!fileKey && !previewUrl) {
       toast({ title: 'Download unavailable', variant: 'destructive' });
       return;
     }
-    setIsDownloading(true);
-    try {
-      if (fileKey) {
-        await downloadFile(fileKey, name);
-      } else {
-        const a = document.createElement('a');
-        a.href = previewUrl!;
-        a.download = name;
-        a.click();
-      }
-    } catch {
-      toast({ title: 'Download failed', variant: 'destructive' });
-    } finally {
-      setIsDownloading(false);
-    }
+    startDownload({ name, key: fileKey, url: fileKey ? undefined : previewUrl });
   };
 
   const handlePreview = () => {

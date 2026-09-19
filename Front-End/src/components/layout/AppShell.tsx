@@ -11,10 +11,12 @@ import FilesPage from '../files/FilesPage';
 import SettingsPage from '../settings/SettingsPage';
 import { useAppContext } from '@/context/AppContext';
 import { useSocket } from '@/hooks/useSocket';
+import { useAutoRefreshScheduler } from '@/hooks/useAutoRefresh';
 import { useNotificationPermission } from '@/hooks/useNotificationPermission';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import PushPermissionBanner from '../PushPermissionBanner';
 import SocketStatusBanner from '../SocketStatusBanner';
+import DownloadsPanel from '../DownloadsPanel';
 import { MessageSquare, FileText, Shield, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -44,6 +46,7 @@ const AppShell: React.FC = () => {
   const [keyboardOpen, setKeyboardOpen] = useState(false);
 
   useSocket();
+  useAutoRefreshScheduler();
   useNotificationPermission();
   usePushNotifications();
 
@@ -373,6 +376,7 @@ const AppShell: React.FC = () => {
       <ForwardMessageModal />
       <MessageInfoModal />
 
+      <DownloadsPanel />
       <Toaster />
       <PushPermissionBanner />
       <SocketStatusBanner />

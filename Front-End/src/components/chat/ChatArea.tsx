@@ -712,7 +712,8 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                             (new Date(msg.timestamp).getTime() - new Date(prevMsg.timestamp).getTime()) < 300000 && !showDivider;
 
           return (
-            <React.Fragment key={msg.id}>
+            // clientKey keeps an optimistically-sent bubble mounted when the saved copy replaces it
+            <React.Fragment key={msg.clientKey || msg.id}>
               {showDivider && <DateDivider date={msg.timestamp} />}
               <div id={`msg-${msg.id}`} className={cn("transition-all duration-1000", isGrouped ? "mt-1" : "mt-6")}>
                 <MessageBubble 

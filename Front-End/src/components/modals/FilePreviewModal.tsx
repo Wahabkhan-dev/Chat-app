@@ -11,7 +11,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSignedUrl } from '@/hooks/useSignedUrl';
-import { downloadFile, getServeUrl, copyImageToClipboard } from '@/services/fileUrl';
+import { getServeUrl, copyImageToClipboard, prepareImageCopy } from '@/services/fileUrl';
+import { startDownload, useIsDownloading } from '@/services/downloadManager';
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
@@ -29,6 +30,19 @@ function getFileIcon(filename: string): string {
   if (['mp4','webm','mov','avi','mkv','mpeg','mpg','3gp','ogv','m4v','wmv','flv',
        'mp3','wav','ogg','m4a','aac','flac','wma','opus'].includes(ext)) return '/icons/media.png';
   return '/icons/file.png';
+}
+
+/**
+ * Documents the browser can reliably show inside the preview. Everything else
+ * (Office, OpenDocument, iWork, design files, CSV, HTML, scripts, …) gets an
+ * icon card instead — embedding them makes the browser auto-download the file,
+ * and HTML would run the uploaded page's code.
+ */
+function getInlineDocKind(filename: string): 'pdf' | 'text' | null {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  if (ext === 'pdf') return 'pdf';
+  if (ext === 'txt') return 'text';
+  return null;
 }
 
 // ─── Inner component: resolves the signed URL and renders the file ────────────
@@ -128,21 +142,31 @@ const GalleryItemView: React.FC<GalleryItemViewProps> = ({
         </div>
       );
     case 'pdf':
-      return (
-        <div className="h-full w-full">
-          <embed src={displayUrl} type="application/pdf" className="h-full w-full" />
-        </div>
-      );
     case 'document':
     case 'xlsx':
     case 'pptx':
     case 'docx':
-    case 'txt':
-      return (
-        <div className="h-full w-full bg-card flex flex-col">
-          <iframe src={displayUrl} className="flex-1 w-full border-none" title={file.name} />
-        </div>
-      );
+    case 'txt': {
+      // Only formats the browser can display inline are embedded; anything else
+      // (Word, Excel, PowerPoint, design files, …) would auto-download, so it
+      // falls through to the icon card below.
+      const docKind = getInlineDocKind(file.name);
+      if (docKind === 'pdf') {
+        return (
+          <div className="h-full w-full">
+            <embed src={displayUrl} type="application/pdf" className="h-full w-full" />
+          </div>
+        );
+      }
+      if (docKind === 'text') {
+        return (
+          <div className="h-full w-full bg-card flex flex-col">
+            <iframe src={displayUrl} className="flex-1 w-full border-none" title={file.name} sandbox="" />
+          </div>
+        );
+      }
+    }
+    // falls through
     default:
       return (
         <div className="flex flex-col items-center justify-center h-full gap-5 text-center px-8">
@@ -186,7 +210,6 @@ const FilePreviewModal: React.FC = () => {
   const { state, dispatch } = useAppContext();
   const { open, items, currentIndex } = state.mediaGallery;
 
-  const [downloading, setDownloading] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
@@ -207,6 +230,20 @@ const FilePreviewModal: React.FC = () => {
   // Resolve signed URL for the copy action (called unconditionally — hook rules)
   const { url: copySignedUrl } = useSignedUrl(currentFile?.key || undefined);
   const imageCopyUrl = copySignedUrl || currentFile?.url || '';
+  // Same-origin proxied URL for keyed files (the signed R2 URL is cross-origin and can't be read)
+  const imageFetchUrl = currentFile?.key ? getServeUrl(currentFile.key) : imageCopyUrl;
+
+  // Pre-load the image for copying as soon as it's shown, so Copy / Ctrl+C is instant
+  useEffect(() => {
+    if (open && isImage && imageFetchUrl) prepareImageCopy(imageFetchUrl);
+  }, [open, isImage, imageFetchUrl]);
+
+  const downloadSource = {
+    name: currentFile?.name || 'file',
+    key: currentFile?.key || undefined,
+    url: currentFile?.key ? undefined : currentFile?.url,
+  };
+  const downloading = useIsDownloading(downloadSource);
 
   const handleClose = useCallback(() => {
     dispatch({ type: 'CLOSE_GALLERY' });
@@ -317,25 +354,9 @@ const FilePreviewModal: React.FC = () => {
     dragRef.current = null;
   }, []);
 
-  const handleDownload = async () => {
+  const handleDownload = () => {
     if (!currentFile) return;
-    if (currentFile.key) {
-      setDownloading(true);
-      try {
-        await downloadFile(currentFile.key, currentFile.name);
-      } catch {
-        dispatch({ type: 'ADD_TOAST', payload: { message: 'Download failed', type: 'error' } });
-      } finally {
-        setDownloading(false);
-      }
-    } else if (currentFile.url) {
-      const a = document.createElement('a');
-      a.href = currentFile.url;
-      a.download = currentFile.name;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    }
+    startDownload(downloadSource);
   };
 
   const handleShareFile = async () => {
@@ -359,17 +380,29 @@ const FilePreviewModal: React.FC = () => {
     }
   };
 
-  const handleCopyImage = async () => {
-    if (!currentFile) return;
-    const fetchUrl = currentFile.key ? getServeUrl(currentFile.key) : imageCopyUrl;
-    if (!fetchUrl) return;
-    try {
-      await copyImageToClipboard(fetchUrl);
-      dispatch({ type: 'ADD_TOAST', payload: { message: 'Image copied', type: 'success' } });
-    } catch (err) {
-      dispatch({ type: 'ADD_TOAST', payload: { message: `Copy failed: ${(err as Error).message}`, type: 'error' } });
-    }
-  };
+  // Not async on purpose: the clipboard write must start inside the click/key handler
+  const handleCopyImage = useCallback(() => {
+    if (!imageFetchUrl) return;
+    copyImageToClipboard(imageFetchUrl).then(
+      () => dispatch({ type: 'ADD_TOAST', payload: { message: 'Image copied', type: 'success' } }),
+      (err) => dispatch({ type: 'ADD_TOAST', payload: { message: `Copy failed: ${(err as Error).message}`, type: 'error' } }),
+    );
+  }, [imageFetchUrl, dispatch]);
+
+  // Ctrl+C / Cmd+C copies the image being viewed, like in a browser image viewer
+  useEffect(() => {
+    if (!open || !isImage) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'c' || e.shiftKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (window.getSelection()?.toString()) return; // let normal text copy work
+      e.preventDefault();
+      handleCopyImage();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open, isImage, handleCopyImage]);
 
   if (!open || !currentFile) return null;
 
@@ -378,7 +411,8 @@ const FilePreviewModal: React.FC = () => {
     return <img src={getFileIcon(currentFile.name)} alt="" className="h-4 w-4 object-contain" />;
   };
 
-  const isDoc = ['pdf', 'document', 'docx', 'txt', 'xlsx', 'pptx'].includes(currentFile.type);
+  // Near-fullscreen only for documents actually rendered inline; icon cards use the normal size
+  const isDoc = ['pdf', 'document', 'docx', 'txt', 'xlsx', 'pptx'].includes(currentFile.type) && getInlineDocKind(currentFile.name) !== null;
 
   return (
     // Dark backdrop — p-2 on all devices to maximise modal space

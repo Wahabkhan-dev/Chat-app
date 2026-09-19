@@ -7,9 +7,13 @@ import { Button } from '@/components/ui/button';
 import { Download, Play, FileIcon, Eye, Loader2, AlertCircle, Copy } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
 import { useSignedUrl } from '@/hooks/useSignedUrl';
-import { downloadFile, getServeUrl, copyImageToClipboard } from '@/services/fileUrl';
-import { toast } from '@/hooks/use-toast';
+import { getServeUrl, copyImageToClipboard, prepareImageCopy } from '@/services/fileUrl';
+import { startDownload, startDownloads, useIsDownloading, type DownloadSource } from '@/services/downloadManager';
 import FileCard from '../ui/FileCard';
+
+function toDownloadSource(file: MessageFile): DownloadSource {
+  return { name: file.name, key: file.key || undefined, url: file.key ? undefined : file.url };
+}
 
 function getFileIconPath(filename: string): string {
   const ext = (filename.split('.').pop() || '').toLowerCase();
@@ -31,58 +35,66 @@ interface FileRendererProps {
   timestamp: string;
 }
 
-// ── Single file components ────────────────────────────────────────────────────
+// ── Right-click "Copy Image" menu (single images and multi-file grid) ─────────
 
-const SecureImage: React.FC<{ file: MessageFile; onView: () => void }> = ({ file, onView }) => {
-  const { url, loading, error } = useSignedUrl(file.key);
-  const [downloading, setDownloading] = useState(false);
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+function useImageCopyMenu(file: MessageFile, src: string | null | undefined) {
   const { dispatch } = useAppContext();
-  const src = file.key ? url : file.url;
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const fetchUrl = file.key ? getServeUrl(file.key) : (src || '');
 
-  const handleDownload = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!file.key) {
-      if (src) {
-        const a = document.createElement('a');
-        a.href = src;
-        a.download = file.name;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      }
-      return;
-    }
-
-    setDownloading(true);
-    try {
-      await downloadFile(file.key, file.name);
-    } catch (error) {
-      console.error('[FileRenderer] download failed', error);
-      toast({ title: 'Download failed', description: `Could not download ${file.name}.`, variant: 'destructive' });
-    } finally {
-      setDownloading(false);
-    }
-  };
-
-  const handleContextMenu = (e: React.MouseEvent) => {
+  const onContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (!fetchUrl) return;
+    // Start loading the image now so the copy is instant when the menu item is clicked
+    prepareImageCopy(fetchUrl);
     const x = Math.min(e.clientX, window.innerWidth - 180);
     const y = Math.min(e.clientY, window.innerHeight - 60);
     setCtxMenu({ x, y });
   };
 
-  const handleCopyImage = async () => {
+  // Not async on purpose: the clipboard write must start inside the click handler
+  const handleCopy = () => {
     setCtxMenu(null);
-    if (!src) return;
-    try {
-      const fetchUrl = file.key ? getServeUrl(file.key) : src;
-      await copyImageToClipboard(fetchUrl);
-      dispatch({ type: 'ADD_TOAST', payload: { message: 'Image copied', type: 'success' } });
-    } catch (err) {
-      dispatch({ type: 'ADD_TOAST', payload: { message: `Copy failed: ${(err as Error).message}`, type: 'error' } });
-    }
+    if (!fetchUrl) return;
+    copyImageToClipboard(fetchUrl).then(
+      () => dispatch({ type: 'ADD_TOAST', payload: { message: 'Image copied', type: 'success' } }),
+      (err) => dispatch({ type: 'ADD_TOAST', payload: { message: `Copy failed: ${(err as Error).message}`, type: 'error' } }),
+    );
+  };
+
+  const menu = ctxMenu && (
+    <>
+      <div className="fixed inset-0 z-[49]" onClick={(e) => { e.stopPropagation(); setCtxMenu(null); }} onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }} />
+      <div
+        className="fixed z-50 bg-card border border-border shadow-2xl py-1.5 rounded-xl min-w-[160px] animate-in zoom-in-95 duration-150"
+        style={{ left: ctxMenu.x, top: ctxMenu.y }}
+      >
+        <button
+          onClick={(e) => { e.stopPropagation(); handleCopy(); }}
+          className="w-full px-3 py-2 text-left text-xs font-semibold hover:bg-muted flex items-center gap-2.5 transition-colors"
+        >
+          <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+          Copy Image
+        </button>
+      </div>
+    </>
+  );
+
+  return { onContextMenu, menu };
+}
+
+// ── Single file components ────────────────────────────────────────────────────
+
+const SecureImage: React.FC<{ file: MessageFile; onView: () => void }> = ({ file, onView }) => {
+  const { url, loading, error } = useSignedUrl(file.key);
+  const downloading = useIsDownloading(toDownloadSource(file));
+  const src = file.key ? url : file.url;
+  const { onContextMenu: handleContextMenu, menu: copyMenu } = useImageCopyMenu(file, src);
+
+  const handleDownload = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    startDownload(toDownloadSource(file));
   };
 
   if (loading) return (
@@ -126,23 +138,7 @@ const SecureImage: React.FC<{ file: MessageFile; onView: () => void }> = ({ file
         </div>
       </div>
 
-      {ctxMenu && (
-        <>
-          <div className="fixed inset-0 z-[49]" onClick={() => setCtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }} />
-          <div
-            className="fixed z-50 bg-card border border-border shadow-2xl py-1.5 rounded-xl min-w-[160px] animate-in zoom-in-95 duration-150"
-            style={{ left: ctxMenu.x, top: ctxMenu.y }}
-          >
-            <button
-              onClick={handleCopyImage}
-              className="w-full px-3 py-2 text-left text-xs font-semibold hover:bg-muted flex items-center gap-2.5 transition-colors"
-            >
-              <Copy className="h-3.5 w-3.5 text-muted-foreground" />
-              Copy Image
-            </button>
-          </div>
-        </>
-      )}
+      {copyMenu}
     </>
   );
 };
@@ -209,11 +205,17 @@ const SecureDoc: React.FC<{ file: MessageFile; messageId: string; onView: () => 
 const GridThumb: React.FC<{ file: MessageFile; idx: number; remainingCount: number; onView: () => void }> = ({ file, idx, remainingCount, onView }) => {
   const { url, loading } = useSignedUrl(file.key);
   const src = file.key ? url : file.url;
+  const downloading = useIsDownloading(toDownloadSource(file));
+  const hasOverflowOverlay = idx === 3 && remainingCount > 0;
+  const { onContextMenu, menu: copyMenu } = useImageCopyMenu(file, src);
+  const canCopy = file.type === 'image' && !!src && !hasOverflowOverlay;
 
   return (
+    <>
     <div
       className="relative aspect-square bg-muted group overflow-hidden cursor-pointer rounded-xl flex items-center justify-center border border-border"
       onClick={onView}
+      onContextMenu={canCopy ? onContextMenu : undefined}
     >
       {loading ? (
         <Loader2 className="h-5 w-5 text-muted-foreground animate-spin" />
@@ -239,12 +241,25 @@ const GridThumb: React.FC<{ file: MessageFile; idx: number; remainingCount: numb
         </div>
       </div>
 
-      {idx === 3 && remainingCount > 0 && (
+      {hasOverflowOverlay ? (
         <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white text-lg font-bold backdrop-blur-[2px]">
           +{remainingCount}
         </div>
+      ) : (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); startDownload(toDownloadSource(file)); }}
+          disabled={downloading}
+          title={`Download ${file.name}`}
+          aria-label={`Download ${file.name}`}
+          className="absolute bottom-1.5 right-1.5 h-7 w-7 rounded-full bg-black/60 hover:bg-primary text-white flex items-center justify-center shadow-md backdrop-blur-sm transition-colors disabled:opacity-80"
+        >
+          {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+        </button>
       )}
     </div>
+    {copyMenu}
+    </>
   );
 };
 
@@ -270,10 +285,21 @@ const FileRenderer: React.FC<FileRendererProps> = ({ files, messageId, senderId,
   const remainingCount = files.length - 4;
 
   return (
-    <div className="grid grid-cols-2 gap-2 max-w-[400px]">
-      {visibleFiles.map((file, idx) => (
-        <GridThumb key={idx} file={file} idx={idx} remainingCount={remainingCount} onView={() => openGallery(idx)} />
-      ))}
+    <div className="max-w-[400px] space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        {visibleFiles.map((file, idx) => (
+          <GridThumb key={idx} file={file} idx={idx} remainingCount={remainingCount} onView={() => openGallery(idx)} />
+        ))}
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        className="w-full h-8 text-[10px] font-bold uppercase tracking-widest rounded-lg gap-1.5 border-border hover:bg-primary/5 hover:text-primary"
+        onClick={() => startDownloads(files.map(toDownloadSource))}
+      >
+        <Download className="h-3.5 w-3.5" />
+        Download all ({files.length})
+      </Button>
     </div>
   );
 };

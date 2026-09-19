@@ -73,45 +73,89 @@ export function getServeUrl(key: string): string {
   return `${BASE_URL}/files/serve?key=${encodeURIComponent(key)}${token ? `&t=${encodeURIComponent(token)}` : ''}`;
 }
 
-/**
- * Copy an image to clipboard via canvas PNG conversion.
- * Uses <img> element for maximum compatibility (avoids createImageBitmap issues).
- * The toBlob callback keeps the user gesture alive for clipboard.write().
- */
-export async function copyImageToClipboard(fetchUrl: string): Promise<void> {
-  const res = await fetch(fetchUrl, { mode: 'cors', credentials: 'include' });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const blob = await res.blob();
+// PNG versions of images, cached so repeat copies are instant. Keyed by fetch URL.
+const PNG_CACHE_LIMIT = 30;
+const pngCache = new Map<string, Promise<Blob>>();
 
+/** Decode any browser-supported image blob and re-encode it as PNG (the only image type clipboards accept). */
+function convertToPng(blob: Blob): Promise<Blob> {
   return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(blob);
     const img = new Image();
-    img.crossOrigin = 'anonymous';
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
       const ctx = canvas.getContext('2d');
+      URL.revokeObjectURL(objectUrl);
       if (!ctx) {
         reject(new Error('Canvas context unavailable'));
         return;
       }
       ctx.drawImage(img, 0, 0);
-      canvas.toBlob(async (pngBlob) => {
-        if (!pngBlob) {
-          reject(new Error('Canvas toBlob failed'));
-          return;
-        }
-        try {
-          await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
-          resolve();
-        } catch (err) {
-          reject(new Error(`Clipboard: ${(err as Error).message}`));
-        }
+      canvas.toBlob((pngBlob) => {
+        if (pngBlob) resolve(pngBlob);
+        else reject(new Error('Canvas toBlob failed'));
       }, 'image/png');
     };
-    img.onerror = () => reject(new Error('Image decode failed'));
-    img.src = URL.createObjectURL(blob);
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Image decode failed'));
+    };
+    img.src = objectUrl;
   });
+}
+
+function getPngBlob(fetchUrl: string): Promise<Blob> {
+  const hit = pngCache.get(fetchUrl);
+  if (hit) return hit;
+
+  const promise = (async () => {
+    const res = await fetch(fetchUrl, { mode: 'cors', credentials: 'include' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    return blob.type === 'image/png' ? blob : convertToPng(blob);
+  })();
+  promise.catch(() => pngCache.delete(fetchUrl));
+
+  pngCache.set(fetchUrl, promise);
+  if (pngCache.size > PNG_CACHE_LIMIT) {
+    pngCache.delete(pngCache.keys().next().value!);
+  }
+  return promise;
+}
+
+/**
+ * Start fetching/converting an image in the background (e.g. when its context
+ * menu opens or it is shown in the preview) so a following copy is instant.
+ */
+export function prepareImageCopy(fetchUrl: string): void {
+  if (!fetchUrl) return;
+  getPngBlob(fetchUrl).catch(() => {});
+}
+
+/**
+ * Copy an image to the clipboard. Call it directly from the click/key handler:
+ * the clipboard write is started immediately (with the PNG still loading), so the
+ * browser keeps the user gesture — this is what makes it work in Safari and keeps
+ * Chrome from rejecting slow copies.
+ */
+export async function copyImageToClipboard(fetchUrl: string): Promise<void> {
+  if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
+    throw new Error('Copying images is not supported in this browser');
+  }
+  const pngPromise = getPngBlob(fetchUrl);
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngPromise })]);
+  } catch (err) {
+    // Older browsers don't accept a promise inside ClipboardItem — retry with the finished blob.
+    if (err instanceof TypeError) {
+      const png = await pngPromise;
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+      return;
+    }
+    throw err;
+  }
 }
 
 /**

@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppContext } from '@/context/AppContext';
 import { useSharedFilesLoader } from '@/hooks/useSharedFiles';
-import { downloadFile } from '@/services/fileUrl';
+import { startDownload, useDownloads } from '@/services/downloadManager';
 import { FileText, FileSpreadsheet, FileImage, Download, Search, ExternalLink, File, MessageSquare, Loader2, Video, Music, Link as LinkIcon, Globe } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -18,7 +18,10 @@ const FilesPage: React.FC = () => {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'docs' | 'media' | 'link'>('all');
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const { items: downloads } = useDownloads();
+  const isFileDownloading = (file: any) => downloads.some(d =>
+    d.status === 'downloading' && (file.key ? d.source.key === file.key : !!file.url && d.source.url === file.url)
+  );
 
   const filteredFiles = sharedFiles.filter(file => {
     const matchesSearch = file.name.toLowerCase().includes(searchQuery.toLowerCase());
@@ -56,33 +59,13 @@ const FilesPage: React.FC = () => {
     }
   };
 
-  const handleDownload = async (file: any) => {
+  const handleDownload = (file: any) => {
     if (file.type === 'link') {
       window.open(file.previewUrl || file.url || file.name, '_blank');
       return;
     }
 
-    setDownloadingId(file.id);
-    try {
-      if (file.key) {
-        await downloadFile(file.key, file.name);
-      } else if (file.url) {
-        const anchor = document.createElement('a');
-        anchor.href = file.url;
-        anchor.download = file.name;
-        anchor.style.display = 'none';
-        document.body.appendChild(anchor);
-        anchor.click();
-        document.body.removeChild(anchor);
-      } else {
-        throw new Error('Download source unavailable');
-      }
-    } catch (error) {
-      console.error('[FilesPage] download failed', error);
-      dispatch({ type: 'ADD_TOAST', payload: { message: `Download failed for ${file.name}`, type: 'error' } });
-    } finally {
-      setDownloadingId(null);
-    }
+    startDownload({ name: file.name, key: file.key || undefined, url: file.key ? undefined : file.url });
   };
 
   const handleGoToConversation = (conversationId: string, focusMessageId?: number | null, file?: any) => {
@@ -273,14 +256,14 @@ const FilesPage: React.FC = () => {
                     <Button 
                       variant="default" 
                       size="sm" 
-                      disabled={downloadingId === file.id}
+                      disabled={isFileDownloading(file)}
                       className={cn(
                         "h-9 w-9 p-0 rounded-xl shadow-lg transition-all",
                         file.type === 'link' ? "bg-blue-500 hover:bg-blue-600 shadow-blue-500/20" : "bg-primary hover:bg-primary/90 shadow-primary/20"
                       )}
                       onClick={() => handleDownload(file)}
                     >
-                      {downloadingId === file.id ? <Loader2 className="h-4 w-4 animate-spin" /> : file.type === 'link' ? <ExternalLink className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+                      {isFileDownloading(file) ? <Loader2 className="h-4 w-4 animate-spin" /> : file.type === 'link' ? <ExternalLink className="h-4 w-4" /> : <Download className="h-4 w-4" />}
                     </Button>
                   </div>
                 </div>

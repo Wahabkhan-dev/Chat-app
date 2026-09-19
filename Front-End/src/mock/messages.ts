@@ -41,6 +41,8 @@ export interface Message {
   hiddenFor?: string[];
   mentions?: string[];
   status?: 'sending' | 'sent' | 'delivered' | 'seen';
+  /** Local id of an optimistically-sent message; kept after the server copy replaces it so the bubble isn't re-mounted. */
+  clientKey?: string;
 }
 
 export const mockMessages: Record<string, Message[]> = {

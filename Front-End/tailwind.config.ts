@@ -11,8 +11,10 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        body: ['Inter', 'sans-serif'],
-        headline: ['Poppins', 'Inter', 'sans-serif'],
+        // Noto Color Emoji (Google's emoji set) comes right after the text fonts, so every
+        // emoji renders in the same Google style on Windows, Mac, iPhone and Android.
+        body: ['Inter', '"Noto Color Emoji"', 'sans-serif'],
+        headline: ['Poppins', 'Inter', '"Noto Color Emoji"', 'sans-serif'],
         code: ['monospace'],
       },
       colors: {

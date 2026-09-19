@@ -43,7 +43,7 @@ const PORT = process.env.PORT || 3001;
 const defaultAllowedOrigins = [
   'http://localhost:9002',
   'http://localhost:9003',
-  'http://192.168.91.173:9002',
+  'http://192.168.91.115:9002',
   'http://localhost:3000',
   'http://localhost:3001',
   'https://chat-app-three-beta-14.vercel.app',

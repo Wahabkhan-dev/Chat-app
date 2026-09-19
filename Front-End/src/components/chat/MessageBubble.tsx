@@ -5,6 +5,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Message } from '@/mock/messages';
 import { useAppContext } from '@/context/AppContext';
 import { cn } from '@/lib/utils';
+import { getJumboEmojiCount } from '@/lib/emoji';
 import { Avatar } from '../ui/avatar';
 import { format } from 'date-fns';
 import { Reply, Forward, SmilePlus, Edit2, Trash2, MoreHorizontal, Check, X, Ban, Pin, CheckCheck, Clock, Undo2, Copy, Share2, Info } from 'lucide-react';
@@ -147,6 +148,13 @@ interface MessageBubbleProps {
 
 const EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥', '✅'];
 
+// Emoji-only messages: fewer emojis → bigger, like WhatsApp
+const JUMBO_EMOJI_SIZE: Record<number, string> = {
+  1: 'text-6xl',
+  2: 'text-5xl',
+  3: 'text-4xl',
+};
+
 const MessageStatus: React.FC<{ status?: Message['status'] }> = ({ status }) => {
   if (status === 'sending') return <Clock className="h-3 w-3 text-muted-foreground animate-pulse" />;
   if (status === 'sent') return <Check className="h-3 w-3 text-muted-foreground" />;
@@ -193,6 +201,10 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
   const isDeleted = message.isDeleted;
   // Sent messages that contain a URL or email get a distinct background color
   const hasLink = isMe && /(https?:\/\/[^\s]+)|([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/i.test(message.content || '');
+  // 1–3 emojis and nothing else → shown big without a bubble (WhatsApp / Teams style)
+  const jumboEmojiCount = !isEditing && !isDeleted && !message.files?.length && !message.links?.length
+    ? getJumboEmojiCount((message.content || '').replace(/^\[Forwarded\]: /, ''))
+    : 0;
 
   const activeConversationId = state.activeConversation?.id || '';
   const repliedMessage = message.replyTo ? 
@@ -357,7 +369,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
             }}
           />
           <div className="flex justify-between items-center px-1">
-            <span className="text-[10px] text-muted-foreground">esc to cancel Â· enter to save</span>
+            <span className="text-[10px] text-muted-foreground">esc to cancel · enter to save</span>
             <div className="flex gap-2">
               <Button size="sm" variant="ghost" className="h-7 text-xs rounded-lg" onClick={() => dispatch({ type: 'SET_EDITING_MESSAGE', payload: null })}>Cancel</Button>
               <Button size="sm" className="h-7 text-xs bg-primary hover:bg-primary/90 rounded-lg text-white" onClick={handleSaveEdit}>Save</Button>
@@ -372,6 +384,14 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
         ? message.content.slice('[Forwarded]: '.length)
         : message.content;
       if (!rawContent) return null;
+
+      if (jumboEmojiCount > 0) {
+        return (
+          <p className={cn('leading-tight select-text', JUMBO_EMOJI_SIZE[jumboEmojiCount])} aria-label={rawContent}>
+            {rawContent.trim()}
+          </p>
+        );
+      }
 
       const THRESHOLD = 300;
       const shouldCollapse = !isEditing && !hasLink && rawContent.length > THRESHOLD;
@@ -457,7 +477,12 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
   };
 
   return (
-    <div id={`msg-${message.id}`} className={cn('flex gap-3 group/msg relative animate-in fade-in slide-in-from-bottom-1 duration-300', isMe ? 'justify-end' : 'justify-start', !isFirstInGroup && 'mt-1')}>
+    <div id={`msg-${message.id}`} className={cn(
+      // WhatsApp-style entry: the bubble rises and grows out of its own corner
+      'flex gap-3 group/msg relative animate-in fade-in duration-200 ease-out',
+      isMe ? 'justify-end slide-in-from-bottom-3 zoom-in-95 origin-bottom-right' : 'justify-start slide-in-from-bottom-2 zoom-in-[0.97] origin-bottom-left',
+      !isFirstInGroup && 'mt-1'
+    )}>
       {!isMe && (
         <div className="w-8 shrink-0">
           {isFirstInGroup && <Avatar name={sender?.name || ''} src={sender?.avatar} size="sm" />}
@@ -469,7 +494,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
           <span className="text-[10px] font-bold text-primary mb-1 uppercase tracking-widest ml-1">{sender?.name}</span>
         )}
 
-        {!isEditing && (
+        {/* No actions until the server confirms the message — it has no real id yet */}
+        {!isEditing && message.status !== 'sending' && (
           <div className={cn(
             "flex items-center gap-1 mb-1 opacity-100 scale-100 sm:opacity-0 sm:scale-95 sm:group-hover/msg:opacity-100 sm:group-hover/msg:scale-100 transition-all bg-card border rounded-xl p-1 shadow-xl z-10",
             isMe ? "mr-1" : "ml-1"
@@ -560,12 +586,18 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
 
         <div
           className={cn(
-            'p-3 px-4 shadow-sm border relative transition-all duration-300 overflow-hidden min-w-0 max-w-full',
-            isMe
-              ? 'bg-primary/10 text-foreground border-primary/30 rounded-2xl rounded-tr-none'
-              : 'bg-card text-card-foreground border-border rounded-2xl rounded-tl-none',
+            'relative transition-all duration-300 overflow-hidden min-w-0 max-w-full',
+            jumboEmojiCount > 0
+              // Emoji-only message: big emojis with no bubble, like WhatsApp / Teams
+              ? 'px-1 py-0.5 bg-transparent'
+              : cn(
+                  'p-3 px-4 shadow-sm border',
+                  isMe
+                    ? 'bg-primary/10 text-foreground border-primary/30 rounded-2xl rounded-tr-none'
+                    : 'bg-card text-card-foreground border-border rounded-2xl rounded-tl-none',
+                  (message.content?.includes(state.currentUser?.name || '---') || (message.content?.includes('@[everyone](everyone)') && !isMe)) && 'ring-2 ring-accent/30 bg-accent/5'
+                ),
             isEditing && 'w-full shadow-2xl ring-4 ring-primary/10 border-primary',
-            (message.content?.includes(state.currentUser?.name || '---') || (message.content?.includes('@[everyone](everyone)') && !isMe)) && 'ring-2 ring-accent/30 bg-accent/5'
           )}
           onCopy={(e) => {
             // Override browser clipboard with plain text only — prevents styled HTML
