@@ -21,6 +21,11 @@ export function clearToken() {
   localStorage.removeItem('teams_token');
 }
 
+// A request that never settles (dropped connection, server hang) used to leave callers'
+// loading spinners stuck forever — e.g. opening a chat right after the 30-min auto-refresh,
+// while the server was still waking up. Every request now gives up after this long.
+const DEFAULT_TIMEOUT_MS = 20_000;
+
 async function request<T>(
   endpoint: string,
   options: RequestInit = {},
@@ -36,17 +41,34 @@ async function request<T>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  // Enforce the timeout without discarding a caller-supplied AbortSignal (e.g. search.ts
+  // cancelling a superseded search) — whichever fires first wins.
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), DEFAULT_TIMEOUT_MS);
+  const callerSignal = options.signal;
+  if (callerSignal) {
+    if (callerSignal.aborted) timeoutController.abort();
+    else callerSignal.addEventListener('abort', () => timeoutController.abort(), { once: true });
+  }
+
   let res: Response;
   try {
     res = await fetch(`${BASE_URL}${endpoint}`, {
       ...options,
       headers,
       credentials: 'include', // Send HTTP-Only cookies with every request (mobile fix)
+      signal: timeoutController.signal,
     });
   } catch (networkErr) {
+    if (callerSignal?.aborted) throw networkErr; // let the caller's own abort (e.g. superseded search) pass through as-is
+    if ((networkErr as Error).name === 'AbortError') {
+      throw new Error(`Request timed out after ${DEFAULT_TIMEOUT_MS / 1000}s. Please try again.`);
+    }
     // fetch rejects on network failure / CORS / server unreachable — surface a clear,
     // non-crashing error instead of an opaque "Something went wrong" from a later parse.
     throw new Error('Network error — could not reach the server. Check your connection.');
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   // Parse the body defensively: a 5xx/gateway error or empty body may not be JSON,
@@ -76,7 +98,7 @@ async function request<T>(
 }
 
 export const api = {
-  get: <T>(endpoint: string) => request<T>(endpoint),
+  get: <T>(endpoint: string, init?: RequestInit) => request<T>(endpoint, init),
   post: <T>(endpoint: string, body: unknown) =>
     request<T>(endpoint, { method: 'POST', body: JSON.stringify(body) }),
   put: <T>(endpoint: string, body: unknown) =>

@@ -1,20 +1,22 @@
 ﻿
 "use client";
 
-import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/lib/api';
 import { getSocket } from '@/services/socket';
 import { markConversationNotificationsRead } from '@/services/notifications';
-import { Search, Info, X, ChevronDown, VolumeX, Lock, Pin, ArrowLeft, Loader2 } from 'lucide-react';
+import { Search, Info, X, ChevronDown, VolumeX, Lock, Pin, ArrowLeft, Loader2, MessageSquare, RefreshCw } from 'lucide-react';
 import { Avatar } from '../ui/avatar';
+import { Button } from '@/components/ui/button';
 import MessageBubble from './MessageBubble';
 import { Message } from '@/mock/messages';
 import { format, isToday, isYesterday, isThisWeek } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import MessageInput, { getFileCategory } from './MessageInput';
+import ChatSearchPanel from './ChatSearchPanel';
 import { Badge } from '@/components/ui/badge';
 import Image from 'next/image';
 import { BRAND_LOGO_URL, BRAND_LOGO_DARK_URL } from '@/lib/brand';
@@ -46,6 +48,9 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const uploadErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Show loading spinner while messages are being fetched from API
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [loadMessagesError, setLoadMessagesError] = useState<string | null>(null);
+  // Bumped by the Retry button to re-run the history-fetch effect below without changing conversation
+  const [loadRetryToken, setLoadRetryToken] = useState(0);
   // Only hide spinner after BOTH loading AND scroll-to-bottom complete.
   const [scrollReady, setScrollReady] = useState(false);
   // Tracks which conversations have been fully fetched from the API this session.
@@ -148,6 +153,7 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     // Fetch messages. Show loading spinner until they arrive, then hide it and scroll to bottom.
     apiLoadedConversations.current.add(activeConversationId);
     setIsLoadingMessages(true);
+    setLoadMessagesError(null);
 
     api.get<{ messages: any[] }>(`/messages/${activeConversationId}?limit=50`)
       .then(({ messages }) => {
@@ -162,13 +168,17 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         setIsLoadingMessages(false);
       })
       .catch((error) => {
-        // Allow retry on next open if the fetch failed
+        // Allow retry on next open if the fetch failed — surfaced via the retry banner below
+        // instead of leaving the spinner stuck (e.g. api.ts's 20s timeout firing right after
+        // the 30-min auto-refresh, while the server is still waking up).
         apiLoadedConversations.current.delete(activeConversationId);
         fetchPendingRef.current = false;
         setIsLoadingMessages(false);
+        setScrollReady(true);
+        setLoadMessagesError(error?.message || 'Could not load messages.');
         console.error(`[ChatArea] failed to load messages for ${activeConversationId}:`, error);
       });
-  }, [activeConversationId]);
+  }, [activeConversationId, loadRetryToken]);
   
   const emitReadStatus = () => {
     if (!activeConversationId || !state.currentUser?.id) return;
@@ -301,12 +311,9 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     scrollRef.current.style.scrollBehavior = '';
   }, [rawMessages]);
 
-  const filteredMessages = useMemo(() => {
-    if (!state.chatUI.isSearchActive || !state.chatUI.searchQuery) return rawMessages;
-    return rawMessages.filter(m => 
-      m.content.toLowerCase().includes(state.chatUI.searchQuery.toLowerCase())
-    );
-  }, [rawMessages, state.chatUI.isSearchActive, state.chatUI.searchQuery]);
+  // Search no longer hides messages — results are listed in ChatSearchPanel and clicking one
+  // jumps to it in the thread, so the conversation stays readable around the match.
+  const filteredMessages = rawMessages;
 
   const typingUsers = activeConversationId ? state.typingUsers[activeConversationId] || [] : [];
   const meta = activeConversationId ? state.conversationMeta[activeConversationId] : null;
@@ -370,6 +377,63 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
       scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }
   };
+
+  // Latest message list, readable inside async loops without stale closures
+  const messagesRef = useRef(rawMessages);
+  useEffect(() => { messagesRef.current = rawMessages; }, [rawMessages]);
+
+  /**
+   * Scroll to a message and flash it. A search hit is often far back in history and
+   * therefore not rendered yet, so older pages are loaded until it shows up.
+   */
+  const jumpToMessage = useCallback(async (messageId: string): Promise<boolean> => {
+    const scrollToIt = () => {
+      const el = document.getElementById(`msg-${messageId}`);
+      if (!el) return false;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('ring-4', 'ring-primary/40', 'rounded-2xl');
+      setTimeout(() => el.classList.remove('ring-4', 'ring-primary/40', 'rounded-2xl'), 2000);
+      return true;
+    };
+    const paint = () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
+    if (scrollToIt()) return true;
+    if (!activeConversationId) return false;
+
+    const OLDER_BATCH = 50;
+    const MAX_PAGES = 20; // up to 1000 older messages
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const oldest = messagesRef.current[0];
+      if (!oldest || !hasMoreOlderRef.current) break;
+      // Already older than the target and still not rendered — it isn't in this conversation
+      if (Number(oldest.id) < Number(messageId)) break;
+
+      loadingOlderRef.current = true;
+      setIsLoadingOlder(true);
+      try {
+        const { messages } = await api.get<{ messages: any[] }>(
+          `/messages/${activeConversationId}?before=${oldest.id}&limit=${OLDER_BATCH}`
+        );
+        if (messages.length === 0) {
+          hasMoreOlderRef.current = false;
+          break;
+        }
+        if (messages.length < OLDER_BATCH) hasMoreOlderRef.current = false;
+        dispatch({ type: 'PREPEND_MESSAGES', payload: { conversationId: activeConversationId, messages } });
+      } catch (error) {
+        console.error('[ChatArea] failed to load history while jumping to a message:', error);
+        break;
+      } finally {
+        loadingOlderRef.current = false;
+        setIsLoadingOlder(false);
+      }
+
+      await paint();
+      if (scrollToIt()) return true;
+    }
+
+    return scrollToIt();
+  }, [activeConversationId, dispatch]);
 
   // If URL contains ?focusMessageId=..., try to scroll to it (persistent navigation)
   useEffect(() => {
@@ -604,7 +668,8 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         <div className="flex items-center gap-0 md:gap-1 shrink-0">
           <button
             onClick={() => dispatch({ type: 'SET_CHAT_SEARCH', payload: { active: !state.chatUI.isSearchActive, query: '' } })}
-            className={cn('p-2 rounded-full transition-all h-9 w-9 hidden md:flex items-center justify-center', state.chatUI.isSearchActive ? 'bg-muted text-primary' : 'hover:bg-muted text-muted-foreground')}
+            title="Search in this chat"
+            className={cn('p-2 rounded-full transition-all h-9 w-9 flex items-center justify-center', state.chatUI.isSearchActive ? 'bg-muted text-primary' : 'hover:bg-muted text-muted-foreground')}
           >
             <Search className="h-4 w-4" />
           </button>
@@ -635,21 +700,13 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         </div>
       )}
 
-      {/* Search Bar */}
-      {state.chatUI.isSearchActive && (
-        <div className="px-6 py-2 border-b bg-muted/30 flex items-center gap-2 animate-in slide-in-from-top-1 z-10">
-          <Search className="h-4 w-4 text-muted-foreground" />
-          <Input 
-            placeholder="Search messages..." 
-            className="flex-1 h-8 bg-transparent border-none focus-visible:ring-0 px-0 text-sm"
-            value={state.chatUI.searchQuery}
-            onChange={(e) => dispatch({ type: 'SET_CHAT_SEARCH', payload: { active: true, query: e.target.value } })}
-            autoFocus
-          />
-          <button onClick={() => dispatch({ type: 'SET_CHAT_SEARCH', payload: { active: false, query: '' } })} className="p-1 hover:bg-muted rounded-full">
-            <X className="h-3.5 w-3.5 text-muted-foreground" />
-          </button>
-        </div>
+      {/* Search this conversation (server-backed — searches the full history) */}
+      {state.chatUI.isSearchActive && activeConversationId && (
+        <ChatSearchPanel
+          conversationId={activeConversationId}
+          onJumpToMessage={jumpToMessage}
+          onClose={() => dispatch({ type: 'SET_CHAT_SEARCH', payload: { active: false, query: '' } })}
+        />
       )}
 
       {/* Pinned Message Banner */}
@@ -683,10 +740,13 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         onScroll={handleScroll}
       >
 
-        {filteredMessages.length === 0 && (
+        {/* Search no longer filters this list (see ChatSearchPanel), so an empty list here
+            means the conversation itself has no messages yet. */}
+        {filteredMessages.length === 0 && scrollReady && !isLoadingMessages && (
           <div className="flex flex-col items-center justify-center py-20 opacity-30">
-            <Search className="h-12 w-12 mb-4" />
-            <p className="text-sm font-bold uppercase tracking-widest">No messages found</p>
+            <MessageSquare className="h-12 w-12 mb-4" />
+            <p className="text-sm font-bold uppercase tracking-widest">No messages yet</p>
+            <p className="text-xs mt-1">Say hello 👋</p>
           </div>
         )}
 
@@ -747,9 +807,24 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         )}
       </div>
 
+        {/* History failed to load (e.g. request timeout right after auto-refresh) — offer an
+            in-app Retry instead of leaving a spinner stuck forever or forcing a page reload. */}
+        {loadMessagesError && !isLoadingMessages && (
+          <div className="absolute inset-0 z-50 bg-background flex flex-col items-center justify-center gap-3 pointer-events-auto px-8 text-center">
+            <p className="text-sm font-bold text-muted-foreground">{loadMessagesError}</p>
+            <Button
+              size="sm"
+              className="rounded-xl font-bold gap-2"
+              onClick={() => { setLoadMessagesError(null); setLoadRetryToken(t => t + 1); }}
+            >
+              <RefreshCw className="h-3.5 w-3.5" /> Retry
+            </Button>
+          </div>
+        )}
+
         {/* Loading overlay — shows while fetching AND while scrolling to bottom.
             Only hides when BOTH are complete: messages loaded AND scrolled to bottom. */}
-        {(isLoadingMessages || !scrollReady) && (
+        {!loadMessagesError && (isLoadingMessages || !scrollReady) && (
           <div className="absolute inset-0 z-50 bg-background flex flex-col items-center justify-center pointer-events-auto">
             <div className="animate-spin">
               <Loader2 className="h-8 w-8 text-primary" />

@@ -207,6 +207,8 @@ type AppAction =
   | { type: 'REMOVE_GROUP_MEMBER'; payload: { groupId: string; userId: string; systemMessage: Message } }
   | { type: 'UPDATE_GROUP_SETTINGS'; payload: { groupId: string; settings: any } }
   | { type: 'SEND_MESSAGE'; payload: { conversationId: string; message: Message } }
+  // Older history page loaded (e.g. scroll-up or search jump) — prepended before existing messages
+  | { type: 'PREPEND_MESSAGES'; payload: { conversationId: string; messages: Message[] } }
   // Optimistic send: replace the local "sending" copy (matched by clientKey) with the saved message
   | { type: 'CONFIRM_MESSAGE'; payload: { conversationId: string; clientKey: string; message: Message } }
   // Optimistic send failed: remove the local "sending" copy

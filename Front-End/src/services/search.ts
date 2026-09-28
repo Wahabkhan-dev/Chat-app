@@ -23,6 +23,9 @@ export interface MessageSearchResult {
   type: string;
 }
 
+// The server ignores anything shorter than this
+export const MIN_SEARCH_LENGTH = 2;
+
 // Debounce search requests
 let searchTimeout: NodeJS.Timeout;
 
@@ -58,6 +61,44 @@ export async function searchMessages(
     console.error('[Search] Message search failed:', err);
     return [];
   }
+}
+
+/**
+ * Search one conversation's full history on the server. Each call cancels the previous one,
+ * so results from an older keystroke can never overwrite newer ones.
+ */
+let conversationSearchController: AbortController | null = null;
+
+export async function searchConversation(
+  query: string,
+  conversationId: string,
+  limit = 100,
+): Promise<MessageSearchResult[] | null> {
+  conversationSearchController?.abort();
+  const trimmed = query.trim();
+  if (trimmed.length < MIN_SEARCH_LENGTH || !conversationId) return [];
+
+  const controller = new AbortController();
+  conversationSearchController = controller;
+  try {
+    const data = await api.get<{ results: MessageSearchResult[] }>(
+      `/messages/search/${encodeURIComponent(trimmed)}?limit=${limit}&conversationId=${encodeURIComponent(conversationId)}`,
+      { signal: controller.signal },
+    );
+    return data.results || [];
+  } catch (err) {
+    // Superseded by a newer keystroke — the caller should keep showing what it has
+    if ((err as Error).name === 'AbortError') return null;
+    console.error('[Search] Conversation search failed:', err);
+    throw err;
+  } finally {
+    if (conversationSearchController === controller) conversationSearchController = null;
+  }
+}
+
+/** Mentions are stored as @[Name](id) — show them as @Name in result snippets. */
+export function toPlainText(content: string): string {
+  return (content || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1');
 }
 
 export function debouncedSearch<T>(

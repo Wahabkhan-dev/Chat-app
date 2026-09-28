@@ -290,7 +290,7 @@ const SettingsPage: React.FC = () => {
               <div className="min-w-0">
                 <h3 className="text-sm font-bold">Auto Refresh</h3>
                 <p className="text-xs text-muted-foreground font-medium">
-                  The app refreshes every 30 minutes to stay up to date.
+                  The app refreshes every 30 minutes to stay up to date. It waits while you're active and refreshes once you're idle.
                 </p>
               </div>
             </div>
