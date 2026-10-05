@@ -137,11 +137,20 @@ const ALLOWED_EXTENSIONS = new Set();
 
 /**
  * Validate file upload security.
- * Accepts any file type; blocks only:
+ * Accepts any file type/format — no extension blocklist. This backend never opens, parses, or
+ * executes an uploaded file: it stores the raw bytes straight to R2 (object storage, which is
+ * equally inert for any format) and serves them back unchanged. So no file FORMAT can harm the
+ * storage or this server; the only things that actually matter here are:
  *   1. Path traversal attacks in the filename
- *   2. Files exceeding 50 MB
+ *   2. Files exceeding 150 MB
  *   3. Image files whose magic bytes do not match their declared MIME type (prevents spoofing)
+ * Internal chat app, trusted employees — what a recipient chooses to download and run on their
+ * own device afterward is their call, not a storage-side risk.
  */
+function getExt(filename) {
+  return (filename.match(/\.[^.]+$/)?.[0] || '').toLowerCase();
+}
+
 function validateFileUpload(file) {
   if (!file) {
     return { valid: false, error: 'No file provided' };
@@ -157,15 +166,23 @@ function validateFileUpload(file) {
     return { valid: false, error: 'File exceeds maximum size of 150 MB' };
   }
 
-  // Magic bytes check — only for declared image MIME types to prevent MIME spoofing
+  // Magic bytes check — only for declared image MIME types to prevent MIME spoofing.
+  // Gated on the file's own EXTENSION also being an image extension: the browser's declared
+  // mimetype comes from the OS's extension->type mapping (Windows registry / macOS UTI), which
+  // can be wrong for unrelated extensions it has no entry for or that got misregistered by some
+  // other installed app (e.g. a non-image file whose extension happens to be mapped to
+  // "image/gif" on that machine). Without this, such a file would fail this check even though
+  // it was never claiming to be an image in the first place.
   const mimeType = file.mimetype || '';
+  const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif']);
+  const ext = getExt(file.originalname);
   const IMAGE_SIGNATURES = {
     'image/jpeg': [0xFF, 0xD8, 0xFF],
     'image/png': [0x89, 0x50, 0x4E, 0x47],
     'image/gif': [0x47, 0x49, 0x46],
   };
   const expectedSig = IMAGE_SIGNATURES[mimeType];
-  if (expectedSig && file.buffer && file.buffer.length >= expectedSig.length) {
+  if (expectedSig && IMAGE_EXTS.has(ext) && file.buffer && file.buffer.length >= expectedSig.length) {
     const fileSig = Array.from(file.buffer.slice(0, expectedSig.length));
     if (!fileSig.every((byte, i) => byte === expectedSig[i])) {
       return { valid: false, error: 'File content does not match declared type' };

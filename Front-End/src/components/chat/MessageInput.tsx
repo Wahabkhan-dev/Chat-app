@@ -31,6 +31,10 @@ const SEND_ACK_TIMEOUT_MS = 20_000;
 const MAX_FILE_SIZE_MB = 150;
 const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
 
+// No format is blocked — see Back-End/middleware/validation.js for why: this backend never
+// opens/runs an uploaded file, it just stores the raw bytes to R2, so no file format is a
+// storage-side risk. Internal office tool, trusted employees.
+
 function getFileIcon(filename: string): string {
   const ext = (filename.split('.').pop() || '').toLowerCase();
   if (ext === 'pdf') return '/icons/pdf.png';
