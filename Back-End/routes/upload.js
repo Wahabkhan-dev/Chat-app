@@ -122,7 +122,11 @@ router.post('/', authenticateToken, upload.array('files', 10), async (req, res) 
       req.files.map(async (file) => {
         const ext = path.extname(file.originalname).toLowerCase();
         const uniqueName = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}${ext}`;
-        const key = `chats/${conversationId}/${uniqueName}`;
+        // Year-month prefix before the conversation id — lets old data be bulk-deleted by date
+        // directly in R2 (a single prefix delete) instead of needing a database-driven script,
+        // which is what a cutoff cleanup required under the old chats/<conversationId>/... layout.
+        const yearMonth = new Date().toISOString().slice(0, 7); // "2026-10"
+        const key = `chats/${yearMonth}/${conversationId}/${uniqueName}`;
 
         console.log(`[upload] uploading — key=${key} size=${file.size} mime=${file.mimetype}`);
 

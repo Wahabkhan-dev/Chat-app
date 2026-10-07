@@ -54,9 +54,17 @@ async function checkAccess(key, userId, userRole, pool) {
     }
     return;
   }
-  // chats/ key
+  // chats/ key — supports both layouts, since files uploaded before this change keep their old
+  // key forever (nothing renames existing R2 objects):
+  //   legacy (pre-dated-folders): chats/<conversationId>/<file>
+  //   current:                    chats/<YYYY-MM>/<conversationId>/<file>
+  // Disambiguated by whether the first segment after chats/ looks like a year-month token —
+  // self-describing, so this needs no "cutover date" and keeps working for both indefinitely.
   const parts = key.split('/');
-  const conversationId = parts.length >= 3 ? parts[1] : null;
+  const isDatedLayout = /^\d{4}-\d{2}$/.test(parts[1]);
+  const conversationId = isDatedLayout
+    ? (parts.length >= 4 ? parts[2] : null)
+    : (parts.length >= 3 ? parts[1] : null);
   if (!conversationId) throw { status: 400, message: 'Cannot determine conversation from key.' };
   if (conversationId.startsWith('dm_')) {
     const dmParts = conversationId.split('_');
@@ -223,10 +231,12 @@ router.post('/copy', authenticateToken, async (req, res) => {
       // Verify the requesting user has read access to the source file
       await checkAccess(srcKey, userId, userRole, pool);
 
-      // Generate a new unique key under the destination conversation
+      // Generate a new unique key under the destination conversation — same dated layout as
+      // new uploads (see routes/upload.js)
       const ext     = path.extname(srcKey).toLowerCase();
       const newName = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}${ext}`;
-      const dstKey  = `chats/${conversationId}/${newName}`;
+      const yearMonth = new Date().toISOString().slice(0, 7);
+      const dstKey  = `chats/${yearMonth}/${conversationId}/${newName}`;
 
       // Server-side copy inside R2 — no client download/upload required
       await r2.send(new CopyObjectCommand({
