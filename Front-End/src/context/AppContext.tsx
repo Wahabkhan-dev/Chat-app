@@ -1160,13 +1160,20 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
         convListMeta[conv.conversationId] = {
           ...base,
           chatTracked: true,
-          ...(incomingTs >= existingTs && isoTimestamp ? {
-            lastMessage: {
-              content: (conv.lastMessageContent || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1'),
-              senderId: conv.lastMessageSenderId || '',
-              timestamp: isoTimestamp,
-            },
-          } : {}),
+          // The server is authoritative on whether a conversation HAS a last message at all —
+          // isoTimestamp is null when it genuinely has none (e.g. all messages were deleted).
+          // Previously this only ever "upgraded" to a newer message and never cleared a stale
+          // cached one (persisted in localStorage, see the cmeta_<userId> save below), so a
+          // conversation emptied out server-side kept showing its old preview text forever.
+          lastMessage: !isoTimestamp
+            ? undefined
+            : incomingTs >= existingTs
+              ? {
+                  content: (conv.lastMessageContent || '').replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1'),
+                  senderId: conv.lastMessageSenderId || '',
+                  timestamp: isoTimestamp,
+                }
+              : existing?.lastMessage,
         };
       });
       return { ...state, conversationMeta: convListMeta };
