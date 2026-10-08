@@ -589,7 +589,10 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
                   <Avatar name={member.name} src={member.avatar} size="sm" status={member.status} showStatus />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold truncate">{member.name}</p>
-                    <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-tighter">{member.department}</p>
+                    {/* "everyone" isn't a real user — its department field is repurposed as a description, not a designation to hide */}
+                    {member.id === 'everyone' && (
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-tighter">{member.department}</p>
+                    )}
                   </div>
                 </button>
               ))}

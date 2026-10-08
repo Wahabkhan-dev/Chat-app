@@ -717,7 +717,6 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
                               />
                               <div className="flex-1 min-w-0">
                                 <p className="text-xs font-bold text-foreground truncate">{user.name}</p>
-                                <p className="text-[9px] text-muted-foreground uppercase tracking-tighter">{user.department}</p>
                               </div>
                             </button>
                           ))}

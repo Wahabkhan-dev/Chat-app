@@ -690,7 +690,7 @@ export function useSocket() {
       // Show visible popup to every connected user
       toast({
         title: '👋 New team member',
-        description: `${user.name} (${user.department || user.role}) has joined the team!`,
+        description: `${user.name} has joined the team!`,
       });
     });
 
