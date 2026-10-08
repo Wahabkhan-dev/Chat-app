@@ -372,20 +372,6 @@ const SettingsPage: React.FC = () => {
                     {state.currentUser?.email}
                   </div>
                 </div>
-                <div className="space-y-2.5 md:col-span-2">
-                  <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Department</Label>
-                  {isAdmin ? (
-                    <Input
-                      value={profileData.department}
-                      onChange={(e) => setProfileData({...profileData, department: e.target.value})}
-                      className="rounded-xl border-border bg-muted/20 h-12 text-sm font-medium focus:bg-card transition-all"
-                    />
-                  ) : (
-                    <div className="rounded-xl bg-muted/30 border border-border h-12 px-4 flex items-center text-sm font-medium text-foreground">
-                      {state.currentUser?.department || '—'}
-                    </div>
-                  )}
-                </div>
               </div>
             </div>
           </TabsContent>

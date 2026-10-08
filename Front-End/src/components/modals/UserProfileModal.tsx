@@ -7,7 +7,7 @@ import Modal from '../ui/Modal';
 import { Avatar } from '../ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Mail, Building, Calendar, MessageSquare, Shield } from 'lucide-react';
+import { Mail, Calendar, MessageSquare, Shield } from 'lucide-react';
 import { format } from 'date-fns';
 import { User } from '@/mock/users';
 import { copyToClipboard } from '@/lib/utils';
@@ -49,9 +49,6 @@ const UserProfileModal: React.FC = () => {
           <Badge variant={user.role === 'admin' ? 'default' : 'secondary'} className="bg-primary/10 text-primary border-none text-[10px] font-bold uppercase tracking-widest px-3">
             {user.role}
           </Badge>
-          <Badge variant="outline" className="text-[10px] font-bold uppercase tracking-widest px-3 border-border">
-            {user.department}
-          </Badge>
         </div>
 
         <div className="w-full mt-8 space-y-4">
@@ -62,16 +59,6 @@ const UserProfileModal: React.FC = () => {
             <div className="min-w-0">
               <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Email Address</p>
               <p className="text-sm font-bold text-foreground truncate">{user.email}</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4 p-3 rounded-xl bg-muted/30">
-            <div className="p-2 bg-card rounded-lg shadow-sm">
-              <Building className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <div>
-              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Department</p>
-              <p className="text-sm font-bold text-foreground">{user.department}</p>
             </div>
           </div>
 

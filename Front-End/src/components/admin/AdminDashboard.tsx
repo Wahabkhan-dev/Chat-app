@@ -282,7 +282,6 @@ const UsersSection: React.FC<{
               <tr className="bg-muted/30 text-left">
                 <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Member</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Email</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Department</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest text-center">Role</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Status</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest text-right">Actions</th>
@@ -296,12 +295,10 @@ const UsersSection: React.FC<{
                       <Avatar name={user.name} src={user.avatar} size="sm" className={!user.isActive ? 'grayscale opacity-50' : ''} />
                       <div className={cn(!user.isActive && 'opacity-60 italic')}>
                         <p className="text-sm font-bold text-foreground group-hover:text-primary transition-colors">{user.name}</p>
-                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-tighter">{user.department}</p>
                       </div>
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground font-medium">{user.email}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground font-bold">{user.department}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-center">
                     <Badge
                       variant={user.role === 'admin' ? 'default' : 'secondary'}

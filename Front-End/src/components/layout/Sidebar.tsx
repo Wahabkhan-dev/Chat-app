@@ -570,9 +570,7 @@ const Sidebar: React.FC<{
             <p className={cn('text-[11px] truncate', !isActive && meta.unreadCount > 0 && !meta.muted ? 'text-foreground font-semibold' : 'text-muted-foreground')}>
               {String(meta.lastMessage.senderId) === currentUserId ? 'You: ' : ''}{meta.lastMessage.content || '📎 Attachment'}
             </p>
-          ) : (
-            <p className="text-[10px] text-muted-foreground truncate font-bold uppercase tracking-tighter">{user.department}</p>
-          )}
+          ) : null}
         </div>
         {!isDeactivated && meta.unreadCount > 0 && (
           <Badge className={cn('h-5 px-1.5 font-bold rounded-lg', meta.muted ? 'bg-muted-foreground/30 text-white' : 'bg-secondary text-white')}>
@@ -687,7 +685,6 @@ const Sidebar: React.FC<{
         <Avatar name={user.name} src={user.avatar} size="md" status={user.status} showStatus />
         <div className="flex-1 text-left min-w-0">
           <p className="text-sm font-semibold truncate group-hover:text-primary transition-colors">{user.name}</p>
-          <p className="text-[10px] text-muted-foreground truncate font-bold uppercase tracking-tighter">{user.department || 'Team Member'}</p>
         </div>
       </button>
     );
@@ -960,7 +957,6 @@ const Sidebar: React.FC<{
                           <Avatar name={u.name} src={u.avatar} size="md" status={u.isActive === false ? undefined : u.status} showStatus={u.isActive !== false} className={u.isActive === false ? 'grayscale' : ''} />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-foreground truncate">{u.name}</p>
-                            <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-tighter">{u.department}</p>
                           </div>
                           {u.isActive === false && (
                             <span className="shrink-0 text-[9px] font-bold text-muted-foreground uppercase bg-muted px-1.5 py-0.5 rounded">Inactive</span>

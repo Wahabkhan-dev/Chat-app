@@ -153,7 +153,6 @@ const CreateGroupModal: React.FC = () => {
                     <Avatar name={user.name} src={user.avatar} size="sm" />
                     <div className="min-w-0">
                       <p className="text-sm font-bold truncate">{user.name}</p>
-                      <Badge variant="secondary" className="text-[9px] h-4 py-0 font-bold uppercase tracking-tighter bg-muted/50 border-none">{user.department}</Badge>
                     </div>
                   </div>
                   <Checkbox 

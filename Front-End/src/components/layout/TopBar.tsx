@@ -91,7 +91,6 @@ const TopBar: React.FC<{ onCreateUser: () => void }> = ({ onCreateUser }) => {
                                 <span className="shrink-0 text-[9px] font-bold text-muted-foreground uppercase bg-muted px-1.5 py-0.5 rounded">Inactive</span>
                               )}
                             </div>
-                            <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-tighter">{u.department}</p>
                           </div>
                         </div>
                       ))}

@@ -10,7 +10,7 @@ import { getSignedUrl } from '@/services/fileUrl';
 import { startDownload, useDownloads } from '@/services/downloadManager';
 import { Avatar } from '../ui/avatar';
 import {
-  X, Mail, Building, Calendar, FileIcon,
+  X, Mail, Calendar, FileIcon,
   UserPlus, Crown, ChevronRight, Download, MoreVertical,
   Trash2, ShieldCheck, ShieldAlert, LogOut, Edit, Bell,
   BellOff, ExternalLink, Image as ImageIcon, Camera,
@@ -654,13 +654,6 @@ const RightPanel: React.FC = () => {
                     <p className="text-sm font-bold break-all">{user?.email}</p>
                   </div>
                 </div>
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-muted rounded-lg text-muted-foreground shrink-0"><Building className="h-4 w-4" /></div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[10px] text-muted-foreground uppercase font-bold">Department</p>
-                    <p className="text-sm font-bold break-words">{user?.department}</p>
-                  </div>
-                </div>
               </div>
 
               <div className="mt-8 flex flex-col gap-3 overflow-hidden">
@@ -787,7 +780,7 @@ const RightPanel: React.FC = () => {
                           .filter(u => group?.members.includes(u.id) && u.id !== state.currentUser?.id)
                           .map(u => (
                             <SelectItem key={u.id} value={u.id} className="text-xs">
-                              {u.name} ({u.department})
+                              {u.name}
                             </SelectItem>
                           ))}
                       </SelectContent>

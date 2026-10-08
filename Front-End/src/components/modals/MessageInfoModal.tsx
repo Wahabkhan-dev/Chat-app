@@ -62,7 +62,6 @@ const MessageInfoModal: React.FC = () => {
       <Avatar name={user.name} src={user.avatar} size="md" status={user.status as any} showStatus />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold truncate">{user.name}</p>
-        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{user.department}</p>
       </div>
       {timeLabel && <span className="text-[10px] text-muted-foreground shrink-0">{timeLabel}</span>}
     </div>

@@ -137,7 +137,6 @@ const LeaveGroupModal: React.FC = () => {
                         <Avatar name={m.name} src={m.avatar} size="sm" />
                         <div className="min-w-0">
                           <p className="text-xs font-bold truncate text-foreground">{m.name}</p>
-                          <p className="text-[10px] text-muted-foreground uppercase">{m.department}</p>
                         </div>
                       </div>
                       <RadioGroupItem value={m.id} className="h-4 w-4" />
