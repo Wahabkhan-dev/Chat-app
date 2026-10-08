@@ -350,6 +350,25 @@ async function addIndexIfMissing(table, indexName, definition) {
 // Wire Socket.IO handlers with optimization service
 setupSocket(io, optimizationService);
 
+// Weekly chat cleanup — every Friday 6:30 AM (Asia/Karachi), deletes messages + R2 files
+// older than 7 days. See services/scheduledCleanupService.js.
+const { startScheduledCleanup, runWeeklyCleanup } = require('./services/scheduledCleanupService');
+startScheduledCleanup();
+
+// Backup trigger for the Free Render instance type, which sleeps after 15 min idle — an
+// in-process cron timer does nothing while asleep. An external scheduler (cron-job.org,
+// UptimeRobot, etc.) hits this at the exact scheduled time instead; the incoming request
+// itself wakes the instance, guaranteeing the cleanup runs on time even if nobody has used
+// the app recently. Protected by CLEANUP_SECRET so it can't be triggered by anyone else.
+app.post('/api/internal/weekly-cleanup', async (req, res) => {
+  const provided = req.headers['x-cleanup-secret'] || req.query.secret;
+  if (!process.env.CLEANUP_SECRET || provided !== process.env.CLEANUP_SECRET) {
+    return res.status(403).json({ message: 'Forbidden.' });
+  }
+  res.json({ message: 'Cleanup triggered.' }); // respond immediately — don't make the caller wait
+  runWeeklyCleanup();
+});
+
 // Cleanup expired sessions and blacklisted tokens every hour
 setInterval(async () => {
   try {
