@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { getLinkMetadata } from '@/services/link-preview';
 import { getSocket } from '@/services/socket';
 import { uploadFilesToR2 } from '@/services/upload';
+import { useMaxUploadMb } from '@/services/appSettings';
 import { toast } from '@/hooks/use-toast';
 
 // Full emoji picker, loaded only when first opened
@@ -28,8 +29,6 @@ const EmojiPicker = dynamic(() => import('./EmojiPicker'), {
 const MAX_FILES = 10;
 // If the server hasn't confirmed a sent message by now, it's treated as not sent
 const SEND_ACK_TIMEOUT_MS = 20_000;
-const MAX_FILE_SIZE_MB = 150;
-const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 // No format is blocked — see Back-End/middleware/validation.js for why: this backend never
 // opens/runs an uploaded file, it just stores the raw bytes to R2, so no file format is a
@@ -108,6 +107,9 @@ function deleteDraft(convId: string) {
 
 const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ onFileError }) => {
   const { state, dispatch } = useAppContext();
+  // Admin-configurable (Settings → Max Upload Size) — single source of truth, see services/appSettings.ts
+  const MAX_FILE_SIZE_MB = useMaxUploadMb();
+  const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [inputCtxMenu, setInputCtxMenu] = useState<{ x: number; y: number } | null>(null);

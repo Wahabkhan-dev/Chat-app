@@ -323,6 +323,15 @@ async function addIndexIfMissing(table, indexName, definition) {
       async () => addIndexIfMissing('message_reactions', 'idx_message_user', '(message_id, user_id)'),
       async () => addIndexIfMissing('group_members', 'idx_group_user', '(group_id, user_id)'),
       async () => addIndexIfMissing('notification_reads', 'idx_notification', '(notification_id)'),
+      // Global (not per-user) config, e.g. the admin-configurable max upload size
+      async () => pool.query(`CREATE TABLE IF NOT EXISTS app_settings (
+        setting_key VARCHAR(100) PRIMARY KEY,
+        setting_value VARCHAR(255) NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`),
+      async () => pool.query(
+        `INSERT IGNORE INTO app_settings (setting_key, setting_value) VALUES ('max_upload_mb', '150')`
+      ),
     ];
 
     for (const migrate of migrations) {

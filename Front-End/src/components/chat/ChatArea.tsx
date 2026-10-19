@@ -5,6 +5,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallba
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useAppContext } from '@/context/AppContext';
 import { api } from '@/lib/api';
+import { useMaxUploadMb } from '@/services/appSettings';
 import { getSocket } from '@/services/socket';
 import { markConversationNotificationsRead } from '@/services/notifications';
 import { Search, Info, X, ChevronDown, VolumeX, Lock, Pin, ArrowLeft, Loader2, MessageSquare, RefreshCw } from 'lucide-react';
@@ -525,7 +526,10 @@ const ChatArea: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   }, []);
 
   const MAX_FILES = 10;
-  const MAX_FILE_SIZE_MB = 100;
+  // Admin-configurable (Settings → Max Upload Size) — single source of truth, see
+  // services/appSettings.ts. Was hardcoded to 100 here vs 150 in MessageInput.tsx — now both
+  // read the same value, fixing that inconsistency too.
+  const MAX_FILE_SIZE_MB = useMaxUploadMb();
   const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
 
   const handleDrop = (e: React.DragEvent) => {

@@ -1,9 +1,36 @@
 const express = require('express');
 const pool = require('../config/database');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, requireAdmin } = require('../middleware/auth');
 const { getSettings, updateSetting, updateSettings } = require('../services/settingsService');
+const {
+  getMaxUploadMb, setMaxUploadMb, MIN_MAX_UPLOAD_MB, MAX_MAX_UPLOAD_MB,
+} = require('../services/appSettingsService');
 
 const router = express.Router();
+
+// GET /api/settings/system — global config every signed-in user can read (needed client-side
+// to validate file size before even attempting an upload)
+router.get('/system', authenticateToken, async (req, res) => {
+  try {
+    const maxUploadMb = await getMaxUploadMb();
+    res.json({ maxUploadMb, minUploadMb: MIN_MAX_UPLOAD_MB, maxUploadMbCeiling: MAX_MAX_UPLOAD_MB });
+  } catch (err) {
+    console.error('Error getting system settings:', err);
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
+
+// PUT /api/settings/system — admin-only: change the max upload size (1–500 MB)
+router.put('/system', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const maxUploadMb = await setMaxUploadMb(req.body.maxUploadMb);
+    res.json({ message: 'Max upload size updated.', maxUploadMb });
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ message: err.message });
+    console.error('Error updating system settings:', err);
+    res.status(500).json({ message: 'Server error.' });
+  }
+});
 
 // GET /api/settings — get all settings for current user
 router.get('/', authenticateToken, async (req, res) => {

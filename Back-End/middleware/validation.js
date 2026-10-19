@@ -117,7 +117,9 @@ function validateNumericId(paramName = 'id') {
  * SECURE UPLOAD VALIDATION
  */
 
-// File size limit: 150 MB per file
+// Default/fallback file size limit (bytes) — the real, admin-configurable limit is passed into
+// validateFileUpload() per call (see routes/upload.js), sourced from appSettingsService. This
+// constant only applies if a caller doesn't pass one.
 const MAX_FILE_SIZE = 150 * 1024 * 1024;
 
 // FILE_SIZE_LIMITS kept for reference / future per-type enforcement
@@ -151,7 +153,7 @@ function getExt(filename) {
   return (filename.match(/\.[^.]+$/)?.[0] || '').toLowerCase();
 }
 
-function validateFileUpload(file) {
+function validateFileUpload(file, maxFileSize = MAX_FILE_SIZE) {
   if (!file) {
     return { valid: false, error: 'No file provided' };
   }
@@ -161,9 +163,10 @@ function validateFileUpload(file) {
     return { valid: false, error: 'Invalid file name' };
   }
 
-  // Enforce 150 MB per-file limit (only meaningful when buffer is available; multer enforces it earlier)
-  if (file.size && file.size > MAX_FILE_SIZE) {
-    return { valid: false, error: 'File exceeds maximum size of 150 MB' };
+  // Enforce the current (admin-configurable) per-file limit, passed in by the caller.
+  // Only meaningful when buffer is available; multer's own hard ceiling enforces earlier too.
+  if (file.size && file.size > maxFileSize) {
+    return { valid: false, error: `File exceeds maximum size of ${Math.round(maxFileSize / (1024 * 1024))} MB` };
   }
 
   // Magic bytes check — only for declared image MIME types to prevent MIME spoofing.

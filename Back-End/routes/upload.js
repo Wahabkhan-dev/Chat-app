@@ -17,11 +17,17 @@ const UPLOAD_ROOT = process.env.UPLOAD_ROOT
   ? path.resolve(process.env.UPLOAD_ROOT)
   : path.join(__dirname, '..', 'uploads');
 
+const { getMaxUploadMbSync, MAX_MAX_UPLOAD_MB } = require('../services/appSettingsService');
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 150 * 1024 * 1024, files: 20 },
+  // Hard outer ceiling — the real, admin-configurable limit (<=MAX_MAX_UPLOAD_MB) is enforced
+  // dynamically below via validateFileUpload. This is just multer's own safety net so it never
+  // buffers more than the absolute max in memory regardless of the current setting.
+  limits: { fileSize: MAX_MAX_UPLOAD_MB * 1024 * 1024, files: 20 },
   fileFilter: (req, file, cb) => {
-    const validation = validateFileUpload(file);
+    const maxBytes = getMaxUploadMbSync() * 1024 * 1024;
+    const validation = validateFileUpload(file, maxBytes);
     if (!validation.valid) {
       cb(new Error(validation.error));
     } else {

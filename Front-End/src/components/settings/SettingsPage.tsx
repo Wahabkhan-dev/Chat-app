@@ -4,12 +4,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAppContext } from '@/context/AppContext';
 import { updateSetting } from '@/services/settings';
-import { User, Palette, Save, Loader2, Monitor, Moon, Sun, Globe, Camera, Bell, BellOff, CheckCircle2, Send, RefreshCw, Timer } from 'lucide-react';
+import { User, Palette, Save, Loader2, Monitor, Moon, Sun, Globe, Camera, Bell, BellOff, CheckCircle2, Send, RefreshCw, Timer, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/hooks/use-toast';
 import { Avatar } from '../ui/avatar';
@@ -53,6 +54,42 @@ const SettingsPage: React.FC = () => {
   const isAdmin = state.currentUser?.role === 'admin';
   const refreshRemaining = useAutoRefreshCountdown();
   const refreshElapsedPct = Math.min(100, 100 - (refreshRemaining / AUTO_REFRESH_INTERVAL_MS) * 100);
+
+  // ── Max upload size (global, admin-configurable) ──────────────────────────
+  const UPLOAD_SIZE_OPTIONS = [10, 25, 50, 100, 150, 200, 250, 300, 400, 500];
+  const [maxUploadMb, setMaxUploadMb] = useState<number | null>(null);
+  const [savingUploadLimit, setSavingUploadLimit] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { api } = await import('@/lib/api');
+        const data = await api.get<{ maxUploadMb: number }>('/settings/system');
+        setMaxUploadMb(data.maxUploadMb);
+      } catch {
+        // Leave it unset — the card just won't render until this succeeds (or a retry via refresh)
+      }
+    })();
+  }, []);
+
+  const handleUploadLimitChange = async (value: string) => {
+    const mb = parseInt(value, 10);
+    const previous = maxUploadMb;
+    setMaxUploadMb(mb); // optimistic
+    setSavingUploadLimit(true);
+    try {
+      const { api } = await import('@/lib/api');
+      await api.put<{ maxUploadMb: number }>('/settings/system', { maxUploadMb: mb });
+      const { invalidateMaxUploadMbCache } = await import('@/services/appSettings');
+      invalidateMaxUploadMbCache();
+      toast({ title: 'Upload limit updated', description: `Files can now be up to ${mb} MB.` });
+    } catch (err: any) {
+      setMaxUploadMb(previous); // revert on failure
+      toast({ title: 'Failed to update upload limit', description: err?.message, variant: 'destructive' });
+    } finally {
+      setSavingUploadLimit(false);
+    }
+  };
 
   const [profileData, setProfileData] = useState({
     department: state.currentUser?.department || '',
@@ -313,6 +350,43 @@ const SettingsPage: React.FC = () => {
             <div className="h-full bg-primary transition-[width] duration-1000 ease-linear" style={{ width: `${refreshElapsedPct}%` }} />
           </div>
         </div>
+
+        {maxUploadMb !== null && (
+          <div className="bg-card rounded-2xl border border-border shadow-sm p-4 md:p-6 mb-4 md:mb-6">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="flex items-center gap-3 md:gap-4 flex-1 min-w-0">
+                <div className="p-2 bg-primary/10 rounded-lg shrink-0">
+                  <UploadCloud className="h-5 w-5 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold">Max Upload Size</h3>
+                  <p className="text-xs text-muted-foreground font-medium">
+                    {isAdmin
+                      ? 'Applies to every file sent in chat, for the whole workspace.'
+                      : `Files larger than this are rejected. Only admins can change this.`}
+                  </p>
+                </div>
+              </div>
+              {isAdmin ? (
+                <div className="flex items-center gap-2 shrink-0">
+                  {savingUploadLimit && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                  <Select value={String(maxUploadMb)} onValueChange={handleUploadLimitChange} disabled={savingUploadLimit}>
+                    <SelectTrigger className="w-28 h-10 rounded-xl font-bold">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {UPLOAD_SIZE_OPTIONS.map(mb => (
+                        <SelectItem key={mb} value={String(mb)}>{mb} MB</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <span className="font-mono text-2xl font-bold tabular-nums text-foreground shrink-0">{maxUploadMb} MB</span>
+              )}
+            </div>
+          </div>
+        )}
 
         <Tabs defaultValue="profile" className="space-y-4 md:space-y-6">
           <TabsList className="bg-card border p-1 rounded-xl h-auto w-full md:w-auto overflow-x-auto">
