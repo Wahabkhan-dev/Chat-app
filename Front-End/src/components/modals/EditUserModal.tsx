@@ -20,19 +20,27 @@ const EditUserModal: React.FC = () => {
   const [formData, setFormData] = useState({
     department: '',
     role: 'user' as UserRole,
+    maxUploadMb: null as number | null, // null = "use workspace default"
   });
+  const [workspaceDefaultMb, setWorkspaceDefaultMb] = useState<number | null>(null);
 
   useEffect(() => {
     if (user && isOpen) {
       setFormData({
         department: user.department,
         role: user.role,
+        maxUploadMb: user.max_upload_mb ?? null,
       });
+      // Shown as the "Workspace default" option's label — fetched fresh each time the modal
+      // opens since an admin may have just changed it on the Settings page.
+      api.get<{ workspaceDefaultMb: number }>('/settings/system')
+        .then(data => setWorkspaceDefaultMb(data.workspaceDefaultMb))
+        .catch(() => {});
     }
   }, [user, isOpen]);
 
   const handleClose = useCallback(() => {
-    setFormData({ department: '', role: 'user' });
+    setFormData({ department: '', role: 'user', maxUploadMb: null });
     dispatch({ type: 'CLOSE_MODAL' });
   }, [dispatch]);
 
@@ -44,6 +52,7 @@ const EditUserModal: React.FC = () => {
         role: formData.role,
         department: formData.department,
         avatar: user.avatar || '',
+        maxUploadMb: formData.maxUploadMb,
       });
       dispatch({ type: 'UPDATE_USER', payload: { ...user, ...updated, id: String(updated.id), isActive: updated.is_active === 1 } });
       toast({ title: 'Profile Updated', description: `${user.name}'s information has been updated.` });
@@ -95,6 +104,25 @@ const EditUserModal: React.FC = () => {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="edit-max-upload" className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Max Upload Size</Label>
+            <Select
+              value={formData.maxUploadMb === null ? 'default' : String(formData.maxUploadMb)}
+              onValueChange={(val) => setFormData({ ...formData, maxUploadMb: val === 'default' ? null : parseInt(val, 10) })}
+            >
+              <SelectTrigger id="edit-max-upload" className="rounded-xl border-border h-11">
+                <SelectValue placeholder="Max upload size" />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl">
+                <SelectItem value="default">
+                  Workspace default{workspaceDefaultMb ? ` (${workspaceDefaultMb} MB)` : ''}
+                </SelectItem>
+                {[10, 25, 50, 100, 150, 200, 250, 300, 400, 500].map(mb => (
+                  <SelectItem key={mb} value={String(mb)}>{mb} MB</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 

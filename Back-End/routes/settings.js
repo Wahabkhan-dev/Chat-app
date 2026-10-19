@@ -3,17 +3,21 @@ const pool = require('../config/database');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 const { getSettings, updateSetting, updateSettings } = require('../services/settingsService');
 const {
-  getMaxUploadMb, setMaxUploadMb, MIN_MAX_UPLOAD_MB, MAX_MAX_UPLOAD_MB,
+  getMaxUploadMb, setMaxUploadMb, getEffectiveMaxUploadMb, MIN_MAX_UPLOAD_MB, MAX_MAX_UPLOAD_MB,
 } = require('../services/appSettingsService');
 
 const router = express.Router();
 
-// GET /api/settings/system — global config every signed-in user can read (needed client-side
-// to validate file size before even attempting an upload)
+// GET /api/settings/system — maxUploadMb is THIS user's effective limit (their own admin-set
+// override if they have one, otherwise the workspace default) — what client-side validation
+// should actually use. workspaceDefaultMb is the plain default, shown to admins for context.
 router.get('/system', authenticateToken, async (req, res) => {
   try {
-    const maxUploadMb = await getMaxUploadMb();
-    res.json({ maxUploadMb, minUploadMb: MIN_MAX_UPLOAD_MB, maxUploadMbCeiling: MAX_MAX_UPLOAD_MB });
+    const [maxUploadMb, workspaceDefaultMb] = await Promise.all([
+      getEffectiveMaxUploadMb(req.user.id),
+      getMaxUploadMb(),
+    ]);
+    res.json({ maxUploadMb, workspaceDefaultMb, minUploadMb: MIN_MAX_UPLOAD_MB, maxUploadMbCeiling: MAX_MAX_UPLOAD_MB });
   } catch (err) {
     console.error('Error getting system settings:', err);
     res.status(500).json({ message: 'Server error.' });

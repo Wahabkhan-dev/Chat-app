@@ -77,10 +77,60 @@ async function setMaxUploadMb(mb) {
   return value;
 }
 
+// ── Per-user override ───────────────────────────────────────────────────────
+// A user's own users.max_upload_mb (set by an admin) wins when present; otherwise falls back
+// to the workspace default above. Cached per-user, same reasoning as the global cache: this
+// runs once per uploaded file (fileFilter), so it must never cost a DB round-trip per file.
+const userCache = new Map(); // userId -> { value: number | null, loadedAt: number }
+
+async function getEffectiveMaxUploadMb(userId) {
+  const hit = userCache.get(userId);
+  if (hit && Date.now() - hit.loadedAt <= CACHE_TTL_MS) {
+    return hit.value !== null ? hit.value : getMaxUploadMb();
+  }
+  try {
+    const [rows] = await pool.query('SELECT max_upload_mb FROM users WHERE id = ?', [userId]);
+    const raw = rows[0]?.max_upload_mb;
+    const value = Number.isFinite(raw) && raw >= MIN_MAX_UPLOAD_MB && raw <= MAX_MAX_UPLOAD_MB ? raw : null;
+    userCache.set(userId, { value, loadedAt: Date.now() });
+    return value !== null ? value : await getMaxUploadMb();
+  } catch (err) {
+    console.error('[appSettings] failed to load per-user max_upload_mb, falling back to workspace default:', err.message);
+    return getMaxUploadMb();
+  }
+}
+
+/** Admin sets (or clears, with mb=null) one user's personal override. */
+async function setUserMaxUploadMb(userId, mb) {
+  let value = null;
+  if (mb !== null && mb !== undefined) {
+    value = Math.round(Number(mb));
+    if (!Number.isFinite(value) || value < MIN_MAX_UPLOAD_MB || value > MAX_MAX_UPLOAD_MB) {
+      throw Object.assign(
+        new Error(`Per-user upload limit must be between ${MIN_MAX_UPLOAD_MB} and ${MAX_MAX_UPLOAD_MB} MB, or cleared to use the workspace default.`),
+        { status: 400 }
+      );
+    }
+  }
+  await pool.query('UPDATE users SET max_upload_mb = ? WHERE id = ?', [value, userId]);
+  userCache.set(userId, { value, loadedAt: Date.now() });
+  return value;
+}
+
+/** Drop a user's cached override so the next upload re-reads it from the DB. Used whenever
+ *  routes/users.js updates max_upload_mb directly (its own UPDATE, outside setUserMaxUploadMb). */
+function invalidateUserUploadCache(userId) {
+  userCache.delete(String(userId));
+  userCache.delete(Number(userId));
+}
+
 module.exports = {
   getMaxUploadMb,
   getMaxUploadMbSync,
   setMaxUploadMb,
+  getEffectiveMaxUploadMb,
+  setUserMaxUploadMb,
+  invalidateUserUploadCache,
   MIN_MAX_UPLOAD_MB,
   MAX_MAX_UPLOAD_MB,
   DEFAULT_MAX_UPLOAD_MB,

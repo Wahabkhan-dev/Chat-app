@@ -6,6 +6,9 @@ const bcrypt = require('bcryptjs');
 const pool = require('../config/database');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 const { r2 } = require('../config/r2');
+const {
+  MIN_MAX_UPLOAD_MB, MAX_MAX_UPLOAD_MB, invalidateUserUploadCache,
+} = require('../services/appSettingsService');
 const { PutObjectCommand } = require('@aws-sdk/client-s3');
 
 const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 3 * 1024 * 1024 } });
@@ -20,8 +23,8 @@ router.get('/directory', authenticateToken, async (req, res) => {
   try {
     const callerIsAdmin = req.user.role === 'admin';
     const [rows] = callerIsAdmin
-      ? await pool.query('SELECT id, name, email, role, avatar, status, department, is_active, created_at FROM users ORDER BY name ASC')
-      : await pool.query("SELECT id, name, email, role, avatar, status, department, is_active, created_at FROM users WHERE role != 'admin' ORDER BY name ASC");
+      ? await pool.query('SELECT id, name, email, role, avatar, status, department, is_active, created_at, max_upload_mb FROM users ORDER BY name ASC')
+      : await pool.query("SELECT id, name, email, role, avatar, status, department, is_active, created_at, max_upload_mb FROM users WHERE role != 'admin' ORDER BY name ASC");
     res.json({ users: rows });
   } catch (err) {
     console.error(err);
@@ -65,7 +68,7 @@ router.get('/search/:query', authenticateToken, async (req, res) => {
 router.get('/', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT id, name, email, role, avatar, status, department, is_active, created_at FROM users ORDER BY created_at DESC'
+      'SELECT id, name, email, role, avatar, status, department, is_active, created_at, max_upload_mb FROM users ORDER BY created_at DESC'
     );
     res.json({ users: rows });
   } catch (err) {
@@ -115,7 +118,7 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
       [
         'user_joined',
         'New team member',
-        `${newUser[0].name} (${newUser[0].department || newUser[0].role}) has joined the team!`,
+        `${newUser[0].name} has joined the team!`,
       ]
     );
 
@@ -134,17 +137,35 @@ router.post('/', authenticateToken, requireAdmin, async (req, res) => {
 
 // PUT /api/users/:id — admin edits a user (name and email are immutable after creation)
 router.put('/:id', authenticateToken, requireAdmin, async (req, res) => {
-  const { role, department, avatar } = req.body;
+  const { role, department, avatar, maxUploadMb } = req.body;
   const { id } = req.params;
 
+  // maxUploadMb: a number (1–MAX_MAX_UPLOAD_MB) sets this user's personal override; null/undefined
+  // clears it back to "use the workspace default". Validated the same way the global setting is.
+  const hasUploadField = Object.prototype.hasOwnProperty.call(req.body, 'maxUploadMb');
+  if (hasUploadField && maxUploadMb !== null) {
+    const mb = Number(maxUploadMb);
+    if (!Number.isFinite(mb) || mb < MIN_MAX_UPLOAD_MB || mb > MAX_MAX_UPLOAD_MB) {
+      return res.status(400).json({ message: `Max upload size must be between ${MIN_MAX_UPLOAD_MB} and ${MAX_MAX_UPLOAD_MB} MB, or cleared.` });
+    }
+  }
+
   try {
-    await pool.query(
-      'UPDATE users SET role = ?, department = ?, avatar = ? WHERE id = ?',
-      [role, department, avatar, id]
-    );
+    if (hasUploadField) {
+      await pool.query(
+        'UPDATE users SET role = ?, department = ?, avatar = ?, max_upload_mb = ? WHERE id = ?',
+        [role, department, avatar, maxUploadMb === null || maxUploadMb === undefined ? null : Math.round(Number(maxUploadMb)), id]
+      );
+      invalidateUserUploadCache(id);
+    } else {
+      await pool.query(
+        'UPDATE users SET role = ?, department = ?, avatar = ? WHERE id = ?',
+        [role, department, avatar, id]
+      );
+    }
 
     const [updated] = await pool.query(
-      'SELECT id, name, email, role, avatar, status, department, is_active, created_at FROM users WHERE id = ?',
+      'SELECT id, name, email, role, avatar, status, department, is_active, created_at, max_upload_mb FROM users WHERE id = ?',
       [id]
     );
 

@@ -13,6 +13,10 @@ export interface User {
   department: string;
   createdAt: string;
   isActive?: boolean;
+  /** Admin-set personal upload-size override, in MB. null/undefined = use the workspace default.
+   *  Deliberately snake_case, matching the raw API field — every User-list fetch spreads the
+   *  API response through unchanged (only is_active gets manually translated to isActive). */
+  max_upload_mb?: number | null;
 }
 
 export const mockUsers: User[] = [

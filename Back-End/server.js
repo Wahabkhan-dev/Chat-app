@@ -332,6 +332,8 @@ async function addIndexIfMissing(table, indexName, definition) {
       async () => pool.query(
         `INSERT IGNORE INTO app_settings (setting_key, setting_value) VALUES ('max_upload_mb', '150')`
       ),
+      // Per-user upload-size override — NULL means "use the workspace default" (app_settings)
+      async () => pool.query('ALTER TABLE users ADD COLUMN max_upload_mb INT NULL DEFAULT NULL'),
     ];
 
     for (const migrate of migrations) {

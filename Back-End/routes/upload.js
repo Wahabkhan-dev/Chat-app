@@ -17,21 +17,24 @@ const UPLOAD_ROOT = process.env.UPLOAD_ROOT
   ? path.resolve(process.env.UPLOAD_ROOT)
   : path.join(__dirname, '..', 'uploads');
 
-const { getMaxUploadMbSync, MAX_MAX_UPLOAD_MB } = require('../services/appSettingsService');
+const { getEffectiveMaxUploadMb, MAX_MAX_UPLOAD_MB } = require('../services/appSettingsService');
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  // Hard outer ceiling — the real, admin-configurable limit (<=MAX_MAX_UPLOAD_MB) is enforced
-  // dynamically below via validateFileUpload. This is just multer's own safety net so it never
-  // buffers more than the absolute max in memory regardless of the current setting.
+  // Hard outer ceiling — the real, admin-configurable limit (<=MAX_MAX_UPLOAD_MB, either the
+  // workspace default or this uploader's own override) is enforced dynamically below via
+  // validateFileUpload. This is just multer's own safety net so it never buffers more than the
+  // absolute max in memory regardless of the current setting.
   limits: { fileSize: MAX_MAX_UPLOAD_MB * 1024 * 1024, files: 20 },
-  fileFilter: (req, file, cb) => {
-    const maxBytes = getMaxUploadMbSync() * 1024 * 1024;
-    const validation = validateFileUpload(file, maxBytes);
-    if (!validation.valid) {
-      cb(new Error(validation.error));
-    } else {
-      cb(null, true);
+  // async fileFilter — multer supports this fine, it just awaits cb() being called eventually.
+  // req.user is already set here: authenticateToken runs before this middleware in the route.
+  fileFilter: async (req, file, cb) => {
+    try {
+      const effectiveMb = await getEffectiveMaxUploadMb(req.user.id);
+      const validation = validateFileUpload(file, effectiveMb * 1024 * 1024);
+      cb(validation.valid ? null : new Error(validation.error), validation.valid);
+    } catch (err) {
+      cb(err);
     }
   },
 });
