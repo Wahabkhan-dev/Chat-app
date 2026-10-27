@@ -4,7 +4,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAppContext } from '@/context/AppContext';
 import { updateSetting } from '@/services/settings';
-import { User, Palette, Save, Loader2, Monitor, Moon, Sun, Globe, Camera, Bell, BellOff, CheckCircle2, Send, RefreshCw, Timer, UploadCloud } from 'lucide-react';
+import { User, Palette, Save, Loader2, Monitor, Moon, Sun, Globe, Camera, Bell, BellOff, CheckCircle2, Send, RefreshCw, Timer, UploadCloud, Clock, Copy, Download, FileUp, Check, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,6 +17,8 @@ import { Avatar } from '../ui/avatar';
 import { cn } from '@/lib/utils';
 import { getApiBaseUrl, getToken } from '@/lib/api';
 import { AUTO_REFRESH_INTERVAL_MS, useAutoRefreshCountdown } from '@/hooks/useAutoRefresh';
+import { uploadTempFile, fetchTempFileInfo, fetchMyTempFiles, TempFileUploadResult, MyTempFile, TempFileInfo } from '@/services/tempFiles';
+import { startDownload } from '@/services/downloadManager';
 
 function formatCountdown(ms: number): string {
   const totalSeconds = Math.ceil(ms / 1000);
@@ -89,6 +91,90 @@ const SettingsPage: React.FC = () => {
     } finally {
       setSavingUploadLimit(false);
     }
+  };
+
+  // ── Temporary file shares (no size limit, expires in up to 3 days, code-protected) ────────
+  const EXPIRY_OPTIONS = [
+    { label: '5 minutes (testing)', hours: 5 / 60 },
+    { label: '1 hour', hours: 1 },
+    { label: '6 hours', hours: 6 },
+    { label: '12 hours', hours: 12 },
+    { label: '1 day', hours: 24 },
+    { label: '2 days', hours: 48 },
+    { label: '3 days (max)', hours: 72 },
+  ];
+  const tempFileInputRef = useRef<HTMLInputElement>(null);
+  const [tempExpiryHours, setTempExpiryHours] = useState(24);
+  const [tempUploading, setTempUploading] = useState(false);
+  const [tempUploadProgress, setTempUploadProgress] = useState(0);
+  const [tempResult, setTempResult] = useState<TempFileUploadResult | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
+
+  const [redeemCode, setRedeemCode] = useState('');
+  const [redeeming, setRedeeming] = useState(false);
+  const [redeemedInfo, setRedeemedInfo] = useState<TempFileInfo | null>(null);
+
+  const [myTempFiles, setMyTempFiles] = useState<MyTempFile[]>([]);
+  const [loadingMyTempFiles, setLoadingMyTempFiles] = useState(false);
+
+  const loadMyTempFiles = async () => {
+    setLoadingMyTempFiles(true);
+    try {
+      setMyTempFiles(await fetchMyTempFiles());
+    } catch {
+      // leave list as-is — not worth a toast for a background refresh
+    } finally {
+      setLoadingMyTempFiles(false);
+    }
+  };
+
+  useEffect(() => { loadMyTempFiles(); }, []);
+
+  const handleTempFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setTempUploading(true);
+    setTempUploadProgress(0);
+    setTempResult(null);
+    try {
+      const result = await uploadTempFile(file, tempExpiryHours, (pct) => setTempUploadProgress(pct));
+      setTempResult(result);
+      toast({ title: 'File uploaded', description: `Share code: ${result.code}` });
+      loadMyTempFiles();
+    } catch (err: any) {
+      toast({ title: 'Upload failed', description: err?.message || 'Could not upload file.', variant: 'destructive' });
+    } finally {
+      setTempUploading(false);
+      if (tempFileInputRef.current) tempFileInputRef.current.value = '';
+    }
+  };
+
+  const handleCopyCode = () => {
+    if (!tempResult) return;
+    navigator.clipboard.writeText(tempResult.code).then(() => {
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 2000);
+    }).catch(() => {});
+  };
+
+  const handleFindCode = async () => {
+    if (!redeemCode.trim()) return;
+    setRedeeming(true);
+    setRedeemedInfo(null);
+    try {
+      setRedeemedInfo(await fetchTempFileInfo(redeemCode));
+    } catch (err: any) {
+      toast({ title: 'Code not found or expired', description: err?.message, variant: 'destructive' });
+    } finally {
+      setRedeeming(false);
+    }
+  };
+
+  const handleDownloadRedeemed = () => {
+    if (!redeemedInfo) return;
+    // Same download manager chat file downloads use — shows a tracked progress row in
+    // the Downloads panel instead of a plain, unmonitored browser download.
+    startDownload({ name: redeemedInfo.name, url: redeemedInfo.url });
   };
 
   const [profileData, setProfileData] = useState({
@@ -402,6 +488,10 @@ const SettingsPage: React.FC = () => {
               <Bell className="h-4 w-4 shrink-0" />
               <span className="hidden sm:inline">Notifications</span>
             </TabsTrigger>
+            <TabsTrigger value="tempfiles" className="flex-1 md:flex-none gap-2 px-3 md:px-6 py-2 rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white transition-all font-bold text-xs uppercase tracking-widest">
+              <Clock className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Temp Files</span>
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="profile" className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
@@ -560,6 +650,148 @@ const SettingsPage: React.FC = () => {
                   )}
                 </Button>
               </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="tempfiles" className="space-y-6 animate-in fade-in slide-in-from-bottom-2">
+            <div className="bg-card rounded-2xl border border-border shadow-sm p-4 md:p-8">
+              <h3 className="text-lg font-bold mb-1 font-headline">Share a Temporary File</h3>
+              <p className="text-sm text-muted-foreground mb-6 font-medium leading-relaxed">
+                No size limit. Pick how long it should stay available (up to 3 days) — after that it's deleted automatically. Anyone with the code can download it, no login required.
+              </p>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-6">
+                <Select value={String(tempExpiryHours)} onValueChange={(v) => setTempExpiryHours(Number(v))} disabled={tempUploading}>
+                  <SelectTrigger className="w-full sm:w-44 h-11 rounded-xl font-bold">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {EXPIRY_OPTIONS.map(opt => (
+                      <SelectItem key={opt.hours} value={String(opt.hours)}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <input type="file" ref={tempFileInputRef} className="hidden" onChange={handleTempFileChange} />
+                <Button
+                  onClick={() => tempFileInputRef.current?.click()}
+                  disabled={tempUploading}
+                  className="rounded-xl h-11 px-6 font-bold gap-2 bg-primary hover:bg-primary/90 text-white shadow-lg shadow-primary/20 flex-1 sm:flex-none"
+                >
+                  {tempUploading ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" />Uploading… {tempUploadProgress}%</>
+                  ) : (
+                    <><FileUp className="h-4 w-4" />Choose File &amp; Upload</>
+                  )}
+                </Button>
+              </div>
+
+              {tempUploading && (
+                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden mb-6">
+                  <div className="h-full bg-primary transition-[width] duration-300 ease-linear" style={{ width: `${tempUploadProgress}%` }} />
+                </div>
+              )}
+
+              {tempResult && (
+                <div className="p-4 md:p-5 rounded-xl bg-primary/5 border border-primary/20 flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-1">Share Code</p>
+                    <p className="font-mono text-2xl font-bold tracking-widest text-foreground break-all">{tempResult.code}</p>
+                    <p className="text-xs text-muted-foreground font-medium mt-1 truncate">
+                      {tempResult.name} · {tempResult.size} · expires {new Date(tempResult.expiresAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCopyCode}
+                    className="rounded-xl h-10 px-4 font-bold gap-2 border-border hover:bg-primary/5 hover:text-primary shrink-0"
+                  >
+                    {codeCopied ? <><Check className="h-4 w-4" />Copied</> : <><Copy className="h-4 w-4" />Copy Code</>}
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-card rounded-2xl border border-border shadow-sm p-4 md:p-8">
+              <h3 className="text-lg font-bold mb-1 font-headline">Have a Code?</h3>
+              <p className="text-sm text-muted-foreground mb-6 font-medium leading-relaxed">
+                Enter an 8-character share code to look up that file's details.
+              </p>
+              <div className="flex flex-col sm:flex-row items-stretch gap-3">
+                <Input
+                  value={redeemCode}
+                  onChange={(e) => { setRedeemCode(e.target.value.toUpperCase()); setRedeemedInfo(null); }}
+                  placeholder="e.g. 7K4PZ9QX"
+                  maxLength={8}
+                  className="rounded-xl h-11 font-mono font-bold tracking-widest uppercase flex-1"
+                  onKeyDown={(e) => e.key === 'Enter' && handleFindCode()}
+                />
+                <Button
+                  onClick={handleFindCode}
+                  disabled={redeeming || redeemCode.trim().length !== 8}
+                  className="rounded-xl h-11 px-6 font-bold gap-2 bg-primary hover:bg-primary/90 text-white shadow-lg shadow-primary/20"
+                >
+                  {redeeming ? <><Loader2 className="h-4 w-4 animate-spin" />Finding…</> : <><Search className="h-4 w-4" />Find</>}
+                </Button>
+              </div>
+
+              {redeemedInfo && (
+                <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-4 p-4 md:p-5 rounded-xl bg-primary/5 border border-primary/20">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold truncate">{redeemedInfo.name}</p>
+                    <p className="text-xs text-muted-foreground font-medium mt-1">
+                      {redeemedInfo.size} · shared by {redeemedInfo.sharedBy} · expires {new Date(redeemedInfo.expiresAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <Button
+                    onClick={handleDownloadRedeemed}
+                    className="rounded-xl h-10 px-5 font-bold gap-2 bg-primary hover:bg-primary/90 text-white shadow-lg shadow-primary/20 shrink-0"
+                  >
+                    <Download className="h-4 w-4" />Download
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-card rounded-2xl border border-border shadow-sm p-4 md:p-8">
+              <h3 className="text-lg font-bold mb-1 font-headline">Your Active Shares</h3>
+              <p className="text-sm text-muted-foreground mb-6 font-medium leading-relaxed">
+                Files you've shared that haven't expired yet. Once a file expires it's deleted automatically and disappears from this list.
+              </p>
+
+              {loadingMyTempFiles ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground font-medium py-4">
+                  <Loader2 className="h-4 w-4 animate-spin" />Loading…
+                </div>
+              ) : myTempFiles.length === 0 ? (
+                <p className="text-sm text-muted-foreground font-medium py-4">You have no active shared files right now.</p>
+              ) : (
+                <div className="space-y-3">
+                  {myTempFiles.map((f) => (
+                    <div key={f.code} className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-xl bg-muted/30 border border-border/50">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold truncate">{f.name}</p>
+                        <p className="text-xs text-muted-foreground font-medium mt-0.5">
+                          {f.size} · expires {new Date(f.expiresAt).toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="font-mono text-sm font-bold tracking-widest bg-card border border-border rounded-lg px-3 py-1.5">{f.code}</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => navigator.clipboard.writeText(f.code).catch(() => {})}
+                          className="rounded-lg h-9 w-9 p-0 border-border hover:bg-primary/5 hover:text-primary"
+                          title="Copy code"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </TabsContent>
 

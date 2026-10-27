@@ -19,6 +19,7 @@ const messageRoutes = require('./routes/messages');
 const groupRoutes = require('./routes/groups');
 const notificationRoutes = require('./routes/notifications');
 const uploadRoutes = require('./routes/upload');
+const tempFilesRoutes = require('./routes/tempFiles');
 const fileRoutes = require('./routes/files');
 const reactionRoutes = require('./routes/reactions');
 const settingsRoutes = require('./routes/settings');
@@ -125,6 +126,7 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/temp-files', tempFilesRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/reactions', reactionRoutes);
 app.use('/api/settings', settingsRoutes);
@@ -333,6 +335,22 @@ async function addIndexIfMissing(table, indexName, definition) {
       ),
       // Per-user upload-size override — NULL means "use the workspace default" (app_settings)
       async () => pool.query('ALTER TABLE users ADD COLUMN max_upload_mb INT NULL DEFAULT NULL'),
+      // Temporary file shares — uploaded with no size cap, downloadable only via their code,
+      // auto-deleted (see services/tempFileCleanupService.js) once expires_at passes.
+      async () => pool.query(`CREATE TABLE IF NOT EXISTS temp_files (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        code VARCHAR(8) NOT NULL UNIQUE,
+        r2_key VARCHAR(500) NOT NULL,
+        original_name VARCHAR(255) NOT NULL,
+        file_size BIGINT DEFAULT 0,
+        mime_type VARCHAR(100) DEFAULT '',
+        uploader_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME NOT NULL,
+        FOREIGN KEY (uploader_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_tf_code (code),
+        INDEX idx_tf_expires_at (expires_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`),
     ];
 
     for (const migrate of migrations) {
@@ -365,6 +383,11 @@ setupSocket(io, optimizationService);
 const { startScheduledCleanup, runWeeklyCleanup } = require('./services/scheduledCleanupService');
 startScheduledCleanup();
 
+// Temporary file shares expire at an arbitrary time the uploader picked (up to 72h out), so
+// this needs a short recurring sweep rather than one fixed weekly time. See tempFileCleanupService.js.
+const { startTempFileCleanup, runTempFileCleanup } = require('./services/tempFileCleanupService');
+startTempFileCleanup();
+
 // Backup trigger for the Free Render instance type, which sleeps after 15 min idle — an
 // in-process cron timer does nothing while asleep. An external scheduler (cron-job.org,
 // UptimeRobot, etc.) hits this at the exact scheduled time instead; the incoming request
@@ -377,6 +400,18 @@ app.post('/api/internal/weekly-cleanup', async (req, res) => {
   }
   res.json({ message: 'Cleanup triggered.' }); // respond immediately — don't make the caller wait
   runWeeklyCleanup();
+});
+
+// Same external-trigger pattern for the temp-file sweep — useful if you want it to run reliably
+// even while the Render instance is asleep (optional: the in-process cron above already covers
+// it whenever the server happens to be awake).
+app.post('/api/internal/temp-file-cleanup', async (req, res) => {
+  const provided = req.headers['x-cleanup-secret'] || req.query.secret;
+  if (!process.env.CLEANUP_SECRET || provided !== process.env.CLEANUP_SECRET) {
+    return res.status(403).json({ message: 'Forbidden.' });
+  }
+  res.json({ message: 'Cleanup triggered.' });
+  runTempFileCleanup();
 });
 
 // Cleanup expired sessions and blacklisted tokens every hour
