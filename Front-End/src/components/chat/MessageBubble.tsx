@@ -2,13 +2,14 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { Message } from '@/mock/messages';
 import { useAppContext } from '@/context/AppContext';
 import { cn } from '@/lib/utils';
 import { getJumboEmojiCount } from '@/lib/emoji';
 import { Avatar } from '../ui/avatar';
 import { format } from 'date-fns';
-import { Reply, Forward, SmilePlus, Edit2, Trash2, MoreHorizontal, Check, X, Ban, Pin, CheckCheck, Clock, Undo2, Copy, Share2, Info } from 'lucide-react';
+import { Reply, Forward, SmilePlus, Edit2, Trash2, MoreHorizontal, Check, X, Ban, Pin, CheckCheck, Clock, Undo2, Copy, Share2, Info, Plus } from 'lucide-react';
 import { getSocket } from '@/services/socket';
 import { api } from '@/lib/api';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -21,6 +22,16 @@ import FileRenderer from './FileRenderer';
 import LinkPreviewCard from './LinkPreviewCard';
 
 const canNativeShare = typeof navigator !== 'undefined' && !!navigator.share;
+
+// Full emoji picker ("+" option on the quick-reaction bar), loaded only when first opened
+const EmojiPicker = dynamic(() => import('./EmojiPicker'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-[min(340px,calc(100vw-32px))] h-[380px] rounded-2xl bg-card border border-border flex items-center justify-center">
+      <div className="h-6 w-6 border-2 border-muted-foreground/30 border-t-primary rounded-full animate-spin" />
+    </div>
+  ),
+});
 
 // ─── Inline content parser: URLs, emails, mentions, bold ─────────────────────
 
@@ -172,6 +183,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
   // a global DOM query — with repeated emoji across messages, a page-wide selector
   // can match a different message's pill and anchor the popover off-screen.
   const [hoveredReaction, setHoveredReaction] = useState<{ emoji: string; top: number; left: number } | null>(null);
+  // The quick-reaction bar's "+" swaps its popover content to the full emoji picker;
+  // reset so it reopens on the short list next time.
+  const [showFullReactionPicker, setShowFullReactionPicker] = useState(false);
   // Long-press (touch) support so anyone — reacted or not — can view who reacted
   // without that first tap also toggling their own reaction.
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -500,15 +514,28 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
             "flex items-center gap-1 mb-1 opacity-100 scale-100 sm:opacity-0 sm:scale-95 sm:group-hover/msg:opacity-100 sm:group-hover/msg:scale-100 transition-all bg-card border rounded-xl p-1 shadow-xl z-10",
             isMe ? "mr-1" : "ml-1"
           )}>
-            <Popover>
+            <Popover onOpenChange={(open) => { if (!open) setShowFullReactionPicker(false); }}>
               <PopoverTrigger asChild>
                 <button title="Emoji Reaction" className="p-1.5 hover:bg-muted rounded-lg text-muted-foreground hover:text-secondary"><SmilePlus className="h-4 w-4" /></button>
               </PopoverTrigger>
-              <PopoverContent className="w-auto p-1.5 rounded-full flex gap-1.5 bg-card border shadow-2xl" side="top">
-                {EMOJIS.map(emoji => (
-                  <button key={emoji} onClick={() => handleReaction(emoji)} className="p-1.5 hover:bg-muted rounded-full text-xl transition-transform hover:scale-125">{emoji}</button>
-                ))}
-              </PopoverContent>
+              {showFullReactionPicker ? (
+                <PopoverContent className="w-auto p-0 bg-transparent border-none shadow-2xl rounded-2xl z-[var(--z-popover)]" side="top">
+                  <EmojiPicker onSelect={(emoji) => { handleReaction(emoji); setShowFullReactionPicker(false); }} />
+                </PopoverContent>
+              ) : (
+                <PopoverContent className="w-auto p-1.5 rounded-full flex gap-1.5 bg-card border shadow-2xl" side="top">
+                  {EMOJIS.map(emoji => (
+                    <button key={emoji} onClick={() => handleReaction(emoji)} className="p-1.5 hover:bg-muted rounded-full text-xl transition-transform hover:scale-125">{emoji}</button>
+                  ))}
+                  <button
+                    title="More emoji"
+                    onClick={() => setShowFullReactionPicker(true)}
+                    className="p-1.5 hover:bg-muted rounded-full text-muted-foreground hover:text-secondary transition-transform hover:scale-125"
+                  >
+                    <Plus className="h-5 w-5" />
+                  </button>
+                </PopoverContent>
+              )}
             </Popover>
 
             {isMe && (
