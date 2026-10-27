@@ -3,8 +3,8 @@ const multer = require('multer');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
-const { PutObjectCommand } = require('@aws-sdk/client-s3');
-const { r2, generateSignedUrl } = require('../config/r2');  // ← add generateSignedUrl
+const { PutObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
+const { r2, generateSignedUrl, generateUploadUrl } = require('../config/r2');
 const { authenticateToken } = require('../middleware/auth');
 const pool = require('../config/database');
 const { createFileMetadata } = require('../services/fileMetadataService');
@@ -85,7 +85,150 @@ function sanitizeConvId(convId) {
   return String(convId || '').replace(/[^a-zA-Z0-9_\-]/g, '');
 }
 
-// POST /api/upload — upload files to private R2; returns key + presigned URL
+// Shared by all three upload routes. Returns null on success, or an {status, message} to send back.
+async function checkConversationAccess(conversationId, userId, role) {
+  if (!conversationId) {
+    return { status: 400, message: 'Invalid conversation ID.' };
+  }
+  try {
+    if (conversationId.startsWith('dm_')) {
+      const parts = conversationId.split('_');
+      if (parts.length !== 3) {
+        return { status: 400, message: 'Invalid DM conversation ID.' };
+      }
+      if (String(userId) !== parts[1] && String(userId) !== parts[2]) {
+        return { status: 403, message: 'Access denied to this conversation.' };
+      }
+    } else if (conversationId !== 'general') {
+      const [rows] = await pool.query(
+        'SELECT id FROM group_members WHERE group_id = ? AND user_id = ? AND left_at IS NULL',
+        [conversationId, userId]
+      );
+      if (rows.length === 0 && role !== 'admin') {
+        return { status: 403, message: 'You are not a member of this group.' };
+      }
+    }
+    return null;
+  } catch (err) {
+    console.error('[upload] access check error:', err.message);
+    return { status: 500, message: 'Failed to verify conversation access.' };
+  }
+}
+
+function buildKey(conversationId, originalname) {
+  const ext = path.extname(originalname).toLowerCase();
+  const uniqueName = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}${ext}`;
+  // Year-month prefix before the conversation id — lets old data be bulk-deleted by date
+  // directly in R2 (a single prefix delete) instead of needing a database-driven script.
+  const yearMonth = new Date().toISOString().slice(0, 7); // "2026-10"
+  return `chats/${yearMonth}/${conversationId}/${uniqueName}`;
+}
+
+// POST /api/upload/presign — mint presigned PUT URLs so the client uploads straight to R2.
+// This is the primary path: it keeps large files off this server entirely (no multer buffering,
+// no blocking fs/R2 writes on the Node event loop — that's what was starving the Socket.io
+// heartbeat and causing "stuck at 100% -> Reconnecting -> error" on big uploads).
+router.post('/presign', authenticateToken, async (req, res) => {
+  const conversationId = sanitizeConvId(req.body.conversationId || 'general');
+  const userId = req.user.id;
+  const files = Array.isArray(req.body.files) ? req.body.files : [];
+
+  if (files.length === 0) {
+    return res.status(400).json({ error: { message: 'No files provided.', statusCode: 400 } });
+  }
+  if (files.length > 10) {
+    return res.status(400).json({ error: { message: 'Maximum 10 files per upload.', statusCode: 400 } });
+  }
+
+  const accessErr = await checkConversationAccess(conversationId, userId, req.user.role);
+  if (accessErr) return res.status(accessErr.status).json({ error: { message: accessErr.message, statusCode: accessErr.status } });
+
+  try {
+    const effectiveMb = await getEffectiveMaxUploadMb(userId);
+    const maxBytes = effectiveMb * 1024 * 1024;
+
+    const presigned = await Promise.all(files.map(async (f) => {
+      const name = String(f?.name || 'file');
+      const size = Number(f?.size) || 0;
+      const mimeType = String(f?.mimeType || 'application/octet-stream');
+
+      const validation = validateFileUpload({ originalname: name, size, mimetype: mimeType }, maxBytes);
+      if (!validation.valid) {
+        const err = new Error(validation.error);
+        err.status = 400;
+        throw err;
+      }
+
+      const key = buildKey(conversationId, name);
+      const uploadUrl = await generateUploadUrl(key, mimeType);
+      return { key, uploadUrl, name, size, mimeType };
+    }));
+
+    res.json({ files: presigned });
+  } catch (err) {
+    console.error('[upload/presign] error:', err.message);
+    res.status(err.status || 500).json({ error: { message: err.message || 'Failed to prepare upload.', statusCode: err.status || 500 } });
+  }
+});
+
+// POST /api/upload/complete — called after the client has PUT the bytes directly to R2.
+// Verifies the object actually landed, records file metadata, and returns a presigned GET URL —
+// the same response shape the old buffered /api/upload returned, so callers don't need to change.
+router.post('/complete', authenticateToken, async (req, res) => {
+  const conversationId = sanitizeConvId(req.body.conversationId || 'general');
+  const userId = req.user.id;
+  const originMessageId = req.body.originMessageId ? parseInt(req.body.originMessageId, 10) : null;
+  const files = Array.isArray(req.body.files) ? req.body.files : [];
+
+  if (files.length === 0) {
+    return res.status(400).json({ error: { message: 'No files provided.', statusCode: 400 } });
+  }
+
+  const accessErr = await checkConversationAccess(conversationId, userId, req.user.role);
+  if (accessErr) return res.status(accessErr.status).json({ error: { message: accessErr.message, statusCode: accessErr.status } });
+
+  try {
+    const results = await Promise.all(files.map(async (f) => {
+      const key = String(f?.key || '');
+      // The key must belong to this conversation — prevents claiming metadata for a key
+      // minted for a different conversation this user doesn't have access to.
+      if (!key.startsWith(`chats/`) || !key.includes(`/${conversationId}/`)) {
+        throw Object.assign(new Error('Invalid file key for this conversation.'), { status: 400 });
+      }
+
+      // Confirm the object actually exists in R2 before trusting it (the client could call
+      // /complete without ever doing the PUT) — and use its real size/type rather than the
+      // client-declared ones, which were only ever a pre-upload estimate.
+      const head = await r2.send(new HeadObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key }));
+
+      const name = String(f?.name || 'file');
+      const size = Number(head.ContentLength) || Number(f?.size) || 0;
+      const mimeType = head.ContentType || String(f?.mimeType || 'application/octet-stream');
+      const ext = path.extname(name).toLowerCase();
+      const fileType = getFileCategory(mimeType, ext);
+
+      const url = await generateSignedUrl(key, 60 * 60 * 24 * 7);
+
+      createFileMetadata(key, conversationId, userId, name, fileType, mimeType, size, originMessageId)
+        .then(meta => console.log(`[upload/complete] metadata saved — fileId=${meta.id}`))
+        .catch(metaErr => console.error('[upload/complete] metadata save failed (non-fatal):', metaErr.message));
+
+      return { key, url, name, size: formatSize(size), type: fileType, mimeType };
+    }));
+
+    if (attachmentService && attachmentService.clearCache) {
+      attachmentService.clearCache();
+    }
+
+    res.json({ files: results });
+  } catch (err) {
+    console.error('[upload/complete] error:', err.message);
+    res.status(err.status || 500).json({ error: { message: err.message || 'Failed to finalize upload.', statusCode: err.status || 500 } });
+  }
+});
+
+// POST /api/upload — legacy buffered upload, kept as a fallback (e.g. very old clients).
+// Prefer /presign + /complete, which bypasses this server for the actual file bytes.
 router.post('/', authenticateToken, upload.array('files', 10), async (req, res) => {
   if (!req.files || req.files.length === 0) {
     return res.status(400).json({ error: { message: 'No files provided.', statusCode: 400 } });
@@ -94,32 +237,8 @@ router.post('/', authenticateToken, upload.array('files', 10), async (req, res) 
   const conversationId = sanitizeConvId(req.body.conversationId || 'general');
   const userId = req.user.id;
 
-  if (!conversationId) {
-    return res.status(400).json({ error: { message: 'Invalid conversation ID.', statusCode: 400 } });
-  }
-
-  try {
-    if (conversationId.startsWith('dm_')) {
-      const parts = conversationId.split('_');
-      if (parts.length !== 3) {
-        return res.status(400).json({ error: { message: 'Invalid DM conversation ID.', statusCode: 400 } });
-      }
-      if (String(userId) !== parts[1] && String(userId) !== parts[2]) {
-        return res.status(403).json({ error: { message: 'Access denied to this conversation.', statusCode: 403 } });
-      }
-    } else if (conversationId !== 'general') {
-      const [rows] = await pool.query(
-        'SELECT id FROM group_members WHERE group_id = ? AND user_id = ? AND left_at IS NULL',
-        [conversationId, userId]
-      );
-      if (rows.length === 0 && req.user.role !== 'admin') {
-        return res.status(403).json({ error: { message: 'You are not a member of this group.', statusCode: 403 } });
-      }
-    }
-  } catch (err) {
-    console.error('[upload] access check error:', err.message);
-    return res.status(500).json({ error: { message: 'Failed to verify conversation access.', statusCode: 500 } });
-  }
+  const accessErr = await checkConversationAccess(conversationId, userId, req.user.role);
+  if (accessErr) return res.status(accessErr.status).json({ error: { message: accessErr.message, statusCode: accessErr.status } });
 
   const r2Ready = !!(process.env.R2_BUCKET_NAME && process.env.R2_ENDPOINT && process.env.R2_ACCESS_KEY_ID);
   if (!r2Ready) console.warn('[upload] R2 not configured — will save files locally');
