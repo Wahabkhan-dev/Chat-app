@@ -486,14 +486,17 @@ function setupSocket(io, optimizationService) {
               const [[gRow]] = await pool.query('SELECT name FROM `groups` WHERE id = ?', [conversationId]);
               pushTitle = `${sName} in ${gRow?.name || 'Group'}`;
             }
+            const pushConversationType = conversationId.startsWith('dm_') ? 'dm' : 'group';
             const pushPayload = {
               title: pushTitle,
               body: pushBody,
               icon: '/fav-1.webp',
               badge: '/fav-1.webp',
               conversationId,
-              conversationType: conversationId.startsWith('dm_') ? 'dm' : 'group',
-              url: '/',
+              conversationType: pushConversationType,
+              // Query params are the fallback used when the SW has to open a brand-new
+              // tab (cold start, no existing client to postMessage) — see sw.js.
+              url: `/?openConversationId=${encodeURIComponent(conversationId)}&openConversationType=${pushConversationType}`,
             };
             for (const recipientId of notifyRecipients) {
               // Skip push for muted recipients

@@ -53,18 +53,25 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const targetUrl = event.notification.data?.url || '/';
+  const conversationId = event.notification.data?.conversationId;
+  const conversationType = event.notification.data?.conversationType;
 
   event.waitUntil(
     clients
       .matchAll({ type: 'window', includeUncontrolled: true })
       .then((clientList) => {
-        // If the app is already open in a tab, focus it
+        // If the app is already open in a tab, focus it AND tell the running page which
+        // conversation to open — focus() alone just brings the tab forward, it doesn't
+        // navigate the already-loaded SPA anywhere.
         for (const client of clientList) {
           if (client.url.startsWith(self.location.origin) && 'focus' in client) {
+            if (conversationId && 'postMessage' in client) {
+              client.postMessage({ type: 'open-conversation', conversationId, conversationType });
+            }
             return client.focus();
           }
         }
-        // Otherwise open a new tab
+        // Otherwise open a new tab — the page reads ?openConversationId=... on load.
         if (clients.openWindow) {
           return clients.openWindow(targetUrl);
         }
