@@ -109,15 +109,13 @@ app.use(express.urlencoded({ limit: '150mb', extended: true }));
 
 // Global rate limiters for different endpoint categories
 const generalLimiter = new RateLimiter('general', 100, 60000).middleware();
-const messageLimiter = new RateLimiter('messages', 60, 60000).middleware(); // history/unread reads (sending is socket-rate-limited separately)
 const notificationLimiter = new RateLimiter('notifications', 50, 60000).middleware();
 
 // Apply rate limiting to specific routes
 app.use('/api/auth', generalLimiter);
 app.use('/api/users', generalLimiter);
-app.use('/api/messages', messageLimiter);
 app.use('/api/notifications', notificationLimiter);
-// Uploads: no rate limit — unlimited.
+// Messages and uploads: no rate limit — unlimited.
 
 // REST routes
 app.use('/api/auth', authRoutes);

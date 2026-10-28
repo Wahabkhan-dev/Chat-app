@@ -8,7 +8,6 @@ const socketEventCounts = new Map();
 // Enhanced rate limiting with specific limits for different operations
 const RATE_LIMITS = {
   general: { maxRequests: 100, windowMs: 60000 }, // 100 req/min
-  messages: { maxRequests: 30, windowMs: 60000 }, // 30 messages/min
   notifications: { maxRequests: 50, windowMs: 60000 }, // 50 notif/min
   reactions: { maxRequests: 60, windowMs: 60000 }, // 60 reactions/min
   uploads: { maxRequests: 10, windowMs: 60000 }, // 10 uploads/min
@@ -163,7 +162,6 @@ class RateLimiter {
  */
 function checkSocketEventLimit(userId, eventName, limits = {}) {
   const defaultLimits = {
-    send_message: { maxEvents: 10, windowMs: 10000 },
     react_message: { maxEvents: 20, windowMs: 10000 },
     edit_message: { maxEvents: 10, windowMs: 10000 },
     delete_message: { maxEvents: 10, windowMs: 10000 },
@@ -233,7 +231,6 @@ setInterval(() => {
 
 // Pre-configured limiters
 const generalLimiter = new RateLimiter(100, 60000); // 100 requests per minute
-const messageLimiter = new RateLimiter(30, 60000); // 30 messages per minute
 const authLimiter = new RateLimiter(5, 900000); // 5 auth attempts per 15 minutes
 
 module.exports = {
@@ -242,6 +239,5 @@ module.exports = {
   checkSocketEventLimit,
   RATE_LIMITS,
   generalLimiter,
-  messageLimiter,
   authLimiter,
 };

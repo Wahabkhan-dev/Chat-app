@@ -291,11 +291,6 @@ function setupSocket(io, optimizationService) {
         return callback?.({ success: false, error: 'Administrator accounts cannot send chat messages.' });
       }
 
-      // Rate limiting
-      if (!checkSocketEventLimit(userId, 'send_message')) {
-        return callback?.({ success: false, error: 'Too many messages. Please slow down.' });
-      }
-
       // Deduplication hash
       const eventHash = hashData({ conversationId, content, replyTo, fileCount: files?.length });
       if (optimizationService.shouldProcessSocketEvent && !optimizationService.shouldProcessSocketEvent(socket.id, 'send_message', eventHash, 2000)) {
