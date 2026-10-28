@@ -97,8 +97,13 @@ const NotificationBell: React.FC<{ className?: string }> = ({ className }) => {
       markNotificationRead(n.id);
     }
     if (n.conversationId) {
-      const conv = n.type === 'dm_message'
-        ? { type: 'dm' as const, id: n.conversationId, name: state.users.find(u => u.id === n.senderId)?.name || 'User' }
+      // Decide DM vs group by the conversation id itself, not notification.type —
+      // "reaction" (and other) notifications fire for DMs too, not just "dm_message",
+      // so matching on type alone sent DM notifications down the group branch and
+      // showed the wrong (fallback/id-based) name instead of the actual user's name.
+      const isDm = n.conversationId.startsWith('dm_');
+      const conv = isDm
+        ? { type: 'dm' as const, id: n.conversationId, name: state.users.find(u => String(u.id) === String(n.senderId))?.name || 'User' }
         : { type: 'group' as const, id: n.conversationId, name: state.groups.find(g => g.id === n.conversationId)?.name || 'Group' };
       dispatch({ type: 'SET_ACTIVE_CONVERSATION', payload: { ...conv, avatar: null } });
       if (n.messageId) {

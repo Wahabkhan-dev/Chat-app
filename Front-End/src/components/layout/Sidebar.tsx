@@ -1,7 +1,8 @@
 
 "use client";
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useAppContext } from '@/context/AppContext';
 import {
   Search, Plus, Settings, Shield, LogOut, FileText,
@@ -138,15 +139,36 @@ const ContextMenu: React.FC<{
   };
 
   const isSiteAdmin = state.currentUser?.role === 'admin';
-  const menuW = 210;
-  const menuH = hasHistory ? 380 : 120;
-  const menuX = x + menuW > window.innerWidth ? x - menuW : x;
-  const menuY = y + menuH > window.innerHeight ? y - menuH : y;
+  const menuRef = useRef<HTMLDivElement>(null);
+  // Fallback estimate for the very first paint (before the real size is measured);
+  // immediately corrected below using the menu's actual rendered dimensions, since
+  // item count varies (admin-only rows, dm vs group, hasHistory) and a fixed guess
+  // can under/overshoot and clip off-screen or duck under the header.
+  const [pos, setPos] = useState(() => ({ left: x, top: y, ready: false }));
 
-  return (
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const margin = 8;
+    // Keep clear of the fixed top header (--z-header) even though the menu's own
+    // z-index already sits above it — a stray top position can still visually
+    // tuck the menu's top edge under the header bar.
+    const headerH = 56;
+    const { offsetWidth: w, offsetHeight: h } = el;
+    const maxLeft = Math.max(margin, window.innerWidth - w - margin);
+    const maxTop = Math.max(headerH + margin, window.innerHeight - h - margin);
+    setPos({
+      left: Math.min(Math.max(margin, x), maxLeft),
+      top: Math.min(Math.max(headerH + margin, y), maxTop),
+      ready: true,
+    });
+  }, [x, y]);
+
+  return createPortal(
     <div
-      className="fixed z-[var(--z-modal)] bg-card border border-border shadow-2xl py-1.5 min-w-[210px] animate-in zoom-in-95 duration-150 rounded-xl"
-      style={{ left: menuX, top: menuY }}
+      ref={menuRef}
+      className="fixed z-[999] bg-card border border-border shadow-2xl py-1.5 min-w-[210px] max-h-[80vh] overflow-y-auto animate-in zoom-in-95 duration-150 rounded-xl"
+      style={{ left: pos.left, top: pos.top, visibility: pos.ready ? 'visible' : 'hidden' }}
       onClick={e => e.stopPropagation()}
     >
       <button
@@ -265,7 +287,8 @@ const ContextMenu: React.FC<{
           )}
         </>
       )}
-    </div>
+    </div>,
+    document.body
   );
 };
 

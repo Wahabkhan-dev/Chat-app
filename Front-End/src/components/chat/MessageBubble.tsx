@@ -1,7 +1,8 @@
 ﻿
 "use client";
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { Message } from '@/mock/messages';
 import { useAppContext } from '@/context/AppContext';
@@ -179,6 +180,11 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
   const [editText, setEditText] = useState(message.content);
   const [expanded, setExpanded] = useState(false);
   const [textCtxMenu, setTextCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  // Right-click anywhere on a message (with no text selected) opens the same action
+  // list as the hover toolbar's "..." menu.
+  const [msgCtxMenu, setMsgCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const msgCtxMenuRef = useRef<HTMLDivElement>(null);
+  const [msgCtxMenuPos, setMsgCtxMenuPos] = useState({ left: 0, top: 0, ready: false });
   // Anchored to the specific pill's own rect (captured at trigger time) rather than
   // a global DOM query — with repeated emoji across messages, a page-wide selector
   // can match a different message's pill and anchor the popover off-screen.
@@ -208,6 +214,44 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
       document.removeEventListener('touchstart', handleOutside);
     };
   }, [hoveredReaction]);
+
+  // Clamp the right-click action menu to the viewport using its real measured size
+  // (item count varies: isMe/isAdmin/group add extra rows) so it never runs off-screen.
+  useLayoutEffect(() => {
+    if (!msgCtxMenu) { setMsgCtxMenuPos(p => ({ ...p, ready: false })); return; }
+    const el = msgCtxMenuRef.current;
+    if (!el) return;
+    const margin = 8;
+    const headerH = 56;
+    const { offsetWidth: w, offsetHeight: h } = el;
+    const maxLeft = Math.max(margin, window.innerWidth - w - margin);
+    const maxTop = Math.max(headerH + margin, window.innerHeight - h - margin);
+    setMsgCtxMenuPos({
+      left: Math.min(Math.max(margin, msgCtxMenu.x), maxLeft),
+      top: Math.min(Math.max(headerH + margin, msgCtxMenu.y), maxTop),
+      ready: true,
+    });
+  }, [msgCtxMenu]);
+
+  // Dismiss on outside click/tap or Escape, same pattern as the "who reacted" popover.
+  useEffect(() => {
+    if (!msgCtxMenu) return;
+    const handleOutside = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('[data-msg-ctx-menu]')) return;
+      setMsgCtxMenu(null);
+    };
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMsgCtxMenu(null); };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [msgCtxMenu]);
+
   const isMe = String(message.senderId) === String(state.currentUser?.id);
   const isAdmin = state.currentUser?.role === 'admin';
   const sender = state.users.find(u => String(u.id) === String(message.senderId));
@@ -638,11 +682,14 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
             e.preventDefault();
             e.stopPropagation();
             const selection = window.getSelection();
-            // Only show copy menu if text is selected
             if (selection && !selection.isCollapsed) {
+              // Text selected — show the plain "Copy" menu
               const x = Math.min(e.clientX, window.innerWidth - 150);
               const y = Math.min(e.clientY, window.innerHeight - 50);
               setTextCtxMenu({ x, y });
+            } else if (!isEditing && !isDeleted && message.status !== 'sending') {
+              // No selection — show the same actions as the "..." hover menu
+              setMsgCtxMenu({ x: e.clientX, y: e.clientY });
             }
           }}
         >
@@ -790,6 +837,55 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isFirstInGroup }
             <Copy className="h-4 w-4" /> Copy
           </button>
         </div>
+      )}
+
+      {/* Right-click action menu — same options as the "..." hover menu */}
+      {msgCtxMenu && createPortal(
+        <div
+          ref={msgCtxMenuRef}
+          data-msg-ctx-menu
+          className="fixed z-[999] bg-card border border-border shadow-2xl py-1.5 min-w-[190px] max-h-[80vh] overflow-y-auto animate-in zoom-in-95 duration-150 rounded-xl"
+          style={{ left: msgCtxMenuPos.left, top: msgCtxMenuPos.top, visibility: msgCtxMenuPos.ready ? 'visible' : 'hidden' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button className="w-full px-3 py-2 text-left text-sm font-medium hover:bg-muted flex items-center gap-3 transition-colors" onClick={() => { dispatch({ type: 'SET_REPLYING_TO', payload: message }); setMsgCtxMenu(null); }}>
+            <Reply className="h-4 w-4 text-muted-foreground" /> Reply
+          </button>
+          <button className="w-full px-3 py-2 text-left text-sm font-medium hover:bg-muted flex items-center gap-3 transition-colors" onClick={() => { dispatch({ type: 'SET_FORWARDING_MESSAGE', payload: message }); setMsgCtxMenu(null); }}>
+            <Forward className="h-4 w-4 text-muted-foreground" /> Forward
+          </button>
+          <button className="w-full px-3 py-2 text-left text-sm font-medium hover:bg-muted flex items-center gap-3 transition-colors" onClick={() => { handleCopyText(); setMsgCtxMenu(null); }}>
+            <Copy className="h-4 w-4 text-muted-foreground" /> Copy Text
+          </button>
+          {canNativeShare && (
+            <button className="w-full px-3 py-2 text-left text-sm font-medium hover:bg-muted flex items-center gap-3 transition-colors" onClick={() => { handleShareMessage(); setMsgCtxMenu(null); }}>
+              <Share2 className="h-4 w-4 text-muted-foreground" /> Share
+            </button>
+          )}
+          <div className="h-px bg-border my-1" />
+          <button className="w-full px-3 py-2 text-left text-sm font-medium hover:bg-muted flex items-center gap-3 transition-colors" onClick={() => { handlePin(); setMsgCtxMenu(null); }}>
+            <Pin className="h-4 w-4 text-muted-foreground" /> {message.isPinned ? 'Unpin Message' : 'Pin Message'}
+          </button>
+          {isMe && (
+            <button className="w-full px-3 py-2 text-left text-sm font-medium hover:bg-muted flex items-center gap-3 transition-colors" onClick={() => { setEditText(message.content); dispatch({ type: 'SET_EDITING_MESSAGE', payload: message.id }); setMsgCtxMenu(null); }}>
+              <Edit2 className="h-4 w-4 text-muted-foreground" /> Edit Message
+            </button>
+          )}
+          {isMe && state.activeConversation?.type === 'group' && (
+            <button className="w-full px-3 py-2 text-left text-sm font-medium hover:bg-muted flex items-center gap-3 transition-colors" onClick={() => { dispatch({ type: 'OPEN_MODAL', payload: { type: 'messageInfo', data: { message } } }); setMsgCtxMenu(null); }}>
+              <Info className="h-4 w-4 text-muted-foreground" /> Message Info
+            </button>
+          )}
+          {(isMe || isAdmin) && (
+            <>
+              <div className="h-px bg-border my-1" />
+              <button className="w-full px-3 py-2 text-left text-sm font-medium text-destructive hover:bg-destructive/10 flex items-center gap-3 transition-colors" onClick={() => { handleDelete(); setMsgCtxMenu(null); }}>
+                <Trash2 className="h-4 w-4" /> Delete
+              </button>
+            </>
+          )}
+        </div>,
+        document.body
       )}
     </div>
   );
