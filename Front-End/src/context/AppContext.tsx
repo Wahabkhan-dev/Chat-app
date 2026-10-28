@@ -844,10 +844,14 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
             const group = state.groups.find(g => g.id === payload.id);
             finalName = group?.name || payload.id;
           } else {
-            // dm: extract the other user id from conversation id and lookup
+            // dm: id is "dm_<id1>_<id2>" — parts[0] is the literal "dm" token, so the
+            // other user is whichever of parts[1]/parts[2] isn't the current user.
+            // (A bare .find(p => p !== currentUserId) picks "dm" itself first and
+            // never reaches the real ids, which is why this previously always fell
+            // through to showing the raw conversation id instead of a name.)
             const parts = payload.id.split('_');
-            const otherId = parts.find(p => p !== String(state.currentUser?.id));
-            const user = otherId ? state.users.find(u => u.id === otherId) : null;
+            const otherId = parts[1] === String(state.currentUser?.id) ? parts[2] : parts[1];
+            const user = otherId ? state.users.find(u => String(u.id) === String(otherId)) : null;
             finalName = user ? (user.displayName || user.name) : payload.id;
           }
         }
