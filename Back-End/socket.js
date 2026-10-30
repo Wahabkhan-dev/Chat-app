@@ -15,6 +15,13 @@ function getDmConvId(id1, id2) {
   return `dm_${Math.min(Number(id1), Number(id2))}_${Math.max(Number(id1), Number(id2))}`;
 }
 
+function formatFileSize(bytes) {
+  if (!bytes || bytes === 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function extractLinks(content) {
   const urlRegex = /(https?:\/\/[^\s<>"']+)/g;
   const urls = [...new Set((content || '').match(urlRegex) || [])];
@@ -324,16 +331,42 @@ function setupSocket(io, optimizationService) {
         }      }
 
       try {
-        const fileAttachments = Array.isArray(files) ? files.map((file) => ({
-          key: typeof file?.key === 'string' ? file.key : null,
-          name: file?.name ? String(file.name) : 'attachment',
-          size: file?.size ? String(file.size) : '0 B',
-          type: file?.type ? String(file.type) : 'other',
-          mimeType: file?.mimeType ? String(file.mimeType) : null,
-        })).filter((file) => file.key) : [];
-
-        if (Array.isArray(files) && files.length > 0 && fileAttachments.length !== files.length) {
-          return callback?.({ success: false, error: 'One or more attached files are missing persistent storage keys.' });
+        // Shared "temp code" files (see routes/tempFiles.js) carry no R2 key the client can see —
+        // just an 8-char code. Resolve those server-side against temp_files so the message's
+        // file metadata (name/size/mimeType/expiry) is trustworthy and not just echoed from the client.
+        const fileAttachments = [];
+        if (Array.isArray(files)) {
+          for (const file of files) {
+            if (file?.tempCode) {
+              const code = String(file.tempCode).toUpperCase().trim();
+              const [[tempRow]] = await pool.query(
+                'SELECT original_name, file_size, mime_type, expires_at FROM temp_files WHERE code = ? AND expires_at > UTC_TIMESTAMP()',
+                [code]
+              );
+              if (!tempRow) {
+                return callback?.({ success: false, error: 'That shared file code has expired or is invalid.' });
+              }
+              fileAttachments.push({
+                key: null,
+                tempCode: code,
+                name: tempRow.original_name,
+                size: formatFileSize(tempRow.file_size),
+                type: tempRow.mime_type?.startsWith('image/') ? 'image' : tempRow.mime_type?.startsWith('video/') ? 'video' : 'other',
+                mimeType: tempRow.mime_type,
+                expiresAt: tempRow.expires_at,
+              });
+            } else if (typeof file?.key === 'string' && file.key) {
+              fileAttachments.push({
+                key: file.key,
+                name: file?.name ? String(file.name) : 'attachment',
+                size: file?.size ? String(file.size) : '0 B',
+                type: file?.type ? String(file.type) : 'other',
+                mimeType: file?.mimeType ? String(file.mimeType) : null,
+              });
+            } else {
+              return callback?.({ success: false, error: 'One or more attached files are missing persistent storage keys.' });
+            }
+          }
         }
 
         const filesJson = fileAttachments.length > 0 ? JSON.stringify(fileAttachments) : null;
@@ -373,11 +406,11 @@ function setupSocket(io, optimizationService) {
 
         // Set origin_message_id on metadata records already written by /api/upload.
         // Do NOT insert again — the upload route already saved them, avoiding duplicates in shared files.
-        if (fileAttachments.length > 0) {
-          const keys = fileAttachments.map(f => f.key);
+        const uploadedKeys = fileAttachments.map(f => f.key).filter(Boolean);
+        if (uploadedKeys.length > 0) {
           pool.query(
             'UPDATE file_metadata SET origin_message_id = ? WHERE r2_key IN (?)',
-            [result.insertId, keys]
+            [result.insertId, uploadedKeys]
           ).catch(err => console.error('[send_message] metadata update failed:', err.message));
         }
 

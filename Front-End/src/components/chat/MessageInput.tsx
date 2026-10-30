@@ -1,9 +1,10 @@
 ﻿"use client";
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { useAppContext } from '@/context/AppContext';
-import { Paperclip, Send, Smile, X, CornerDownRight, AtSign, Lock, ShieldAlert, Plus, Search, FileText, File as FileIcon, Play, Video, LogOut, UserX, ClipboardPaste } from 'lucide-react';
+import { Paperclip, Send, Smile, X, CornerDownRight, AtSign, Lock, ShieldAlert, Plus, Search, FileText, File as FileIcon, Play, Video, LogOut, UserX, ClipboardPaste, Scissors, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Message, MessageFile } from '@/mock/messages';
@@ -15,6 +16,12 @@ import { getSocket } from '@/services/socket';
 import { uploadFilesToR2 } from '@/services/upload';
 import { useMaxUploadMb } from '@/services/appSettings';
 import { toast } from '@/hooks/use-toast';
+import { fetchTempFileInfo } from '@/services/tempFiles';
+import { getWordAt, isMisspelled, suggest } from '@/services/spellcheck';
+
+// Same alphabet/length as Back-End/routes/tempFiles.js's generateCode() — matches ONLY when the
+// whole message is just the code, so ordinary text never gets mistaken for a share code.
+const TEMP_FILE_CODE_RE = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/i;
 
 // Full emoji picker, loaded only when first opened
 const EmojiPicker = dynamic(() => import('./EmojiPicker'), {
@@ -113,6 +120,53 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [inputCtxMenu, setInputCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const inputCtxMenuRef = useRef<HTMLDivElement>(null);
+  const [inputCtxMenuPos, setInputCtxMenuPos] = useState<{ left: number; top: number; ready: boolean }>({ left: 0, top: 0, ready: false });
+  const [ctxHasSelection, setCtxHasSelection] = useState(false);
+  const [spellWord, setSpellWord] = useState<{ word: string; start: number; end: number } | null>(null);
+  const [spellSuggestions, setSpellSuggestions] = useState<string[]>([]);
+
+  // Clamp the custom right-click menu to the viewport using its REAL measured size (re-run
+  // when spelling suggestions arrive async and change the menu's height) instead of a guess.
+  useLayoutEffect(() => {
+    if (!inputCtxMenu) return;
+    const el = inputCtxMenuRef.current;
+    if (!el) return;
+    const margin = 8;
+    const { offsetWidth: w, offsetHeight: h } = el;
+    const maxLeft = Math.max(margin, window.innerWidth - w - margin);
+    const maxTop = Math.max(margin, window.innerHeight - h - margin);
+    setInputCtxMenuPos({
+      left: Math.min(Math.max(margin, inputCtxMenu.x), maxLeft),
+      top: Math.min(Math.max(margin, inputCtxMenu.y), maxTop),
+      ready: true,
+    });
+  }, [inputCtxMenu, spellSuggestions.length]);
+
+  // Close on any click outside the menu (not just on mouse-leave) — and on Escape.
+  useEffect(() => {
+    if (!inputCtxMenu) return;
+    const closeMenu = () => {
+      setInputCtxMenu(null);
+      setSpellWord(null);
+      setSpellSuggestions([]);
+      setInputCtxMenuPos((p) => ({ ...p, ready: false }));
+    };
+    const handleMouseDown = (e: MouseEvent) => {
+      if (inputCtxMenuRef.current && !inputCtxMenuRef.current.contains(e.target as Node)) {
+        closeMenu();
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeMenu();
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [inputCtxMenu]);
 
   const [showMentions, setShowMentions] = useState(false);
   const [mentionSearch, setMentionSearch] = useState('');
@@ -286,6 +340,74 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
     const content = processMentions(inputText.trim());
     pendingMentions.current = [];
     const replyTo = state.replyingTo?.id;
+
+    // A message that is JUST a temp-file share code (see services/tempFiles.ts) is upgraded
+    // into a rich file card with a Download button instead of being sent as plain text.
+    if (uploadedFiles.length === 0 && state.currentUser && TEMP_FILE_CODE_RE.test(content)) {
+      const code = content.toUpperCase();
+      const info = await fetchTempFileInfo(code).catch(() => null);
+      if (info) {
+        const conversationId = activeConversation.id;
+        const clientKey = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const fileType = info.mimeType?.startsWith('image/') ? 'image' : info.mimeType?.startsWith('video/') ? 'video' : 'other';
+        const tempFile: MessageFile = { name: info.name, size: info.size, type: fileType, mimeType: info.mimeType, tempCode: code, expiresAt: info.expiresAt };
+
+        dispatch({
+          type: 'SEND_MESSAGE',
+          payload: {
+            conversationId,
+            message: {
+              id: clientKey,
+              clientKey,
+              senderId: String(state.currentUser.id),
+              content: '',
+              timestamp: new Date().toISOString(),
+              type: fileType === 'image' ? 'image' : fileType === 'video' ? 'video' : 'file',
+              files: [tempFile],
+              reactions: [],
+              replyTo,
+              status: 'sending',
+            },
+          },
+        });
+
+        let settled = false;
+        const failSend = (errorMessage?: string) => {
+          if (settled) return;
+          settled = true;
+          dispatch({ type: 'REMOVE_PENDING_MESSAGE', payload: { conversationId, clientKey } });
+          setInputText(current => (current.trim() ? current : rawText));
+          toast({ title: 'Message not sent', description: errorMessage || 'Check your connection and try again.', variant: 'destructive' });
+        };
+        const ackTimeout = setTimeout(() => failSend(), SEND_ACK_TIMEOUT_MS);
+
+        socket.emit(
+          'send_message',
+          { conversationId, content: '', type: 'text', replyTo, files: [{ tempCode: code }] },
+          (ack: { success: boolean; message?: any; error?: string }) => {
+            clearTimeout(ackTimeout);
+            if (settled) return;
+            if (ack?.success && ack.message) {
+              settled = true;
+              dispatch({ type: 'CONFIRM_MESSAGE', payload: { conversationId, clientKey, message: ack.message } });
+            } else {
+              failSend(ack?.error);
+            }
+          }
+        );
+
+        socket.emit('stop_typing', { conversationId });
+        deleteDraft(conversationId);
+        socket.emit('clear_draft', { conversationId });
+        if (draftTimer.current) clearTimeout(draftTimer.current);
+
+        setInputText('');
+        dispatch({ type: 'SET_REPLYING_TO', payload: null });
+        textareaRef.current?.focus();
+        return;
+      }
+      // Not a valid/active code — fall through and send it as plain text below.
+    }
 
     // Text-only messages are shown instantly (WhatsApp-style) with a clock icon, then swapped
     // for the saved copy when the server confirms. Messages with files wait for the upload.
@@ -667,6 +789,9 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
           <textarea
             ref={textareaRef}
             disabled={isEditing || isSending || isBlockedConversation}
+            spellCheck="true"
+            autoCorrect="on"
+            autoCapitalize="sentences"
             onPaste={handlePaste}
             placeholder={isBlockedConversation ? 'This conversation is blocked. Unblock to send messages.' : isEditing ? 'Finish editing the message above first' : `Message ${activeConversation?.name}...`}
             className="w-full p-3 md:p-4 bg-transparent outline-none resize-none min-h-[48px] md:min-h-[56px] max-h-[96px] md:max-h-[160px] text-sm text-foreground placeholder:text-muted-foreground/60"
@@ -676,9 +801,31 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
             onContextMenu={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              const x = Math.min(e.clientX, window.innerWidth - 150);
-              const y = Math.min(e.clientY, window.innerHeight - 50);
-              setInputCtxMenu({ x, y });
+              const ta = e.currentTarget;
+              const hasSelection = ta.selectionStart !== ta.selectionEnd;
+              setCtxHasSelection(hasSelection);
+              setSpellWord(null);
+              setSpellSuggestions([]);
+              setInputCtxMenuPos((p) => ({ ...p, ready: false }));
+              setInputCtxMenu({ x: e.clientX, y: e.clientY });
+
+              // Only look for a misspelled word when right-clicking a caret position, not a selection
+              if (!hasSelection) {
+                const { word, start, end } = getWordAt(ta.value, ta.selectionStart);
+                const clean = word.replace(/^[^a-zA-Z']+|[^a-zA-Z']+$/g, '');
+                if (clean.length > 1) {
+                  const cleanStart = start + word.indexOf(clean);
+                  const cleanEnd = cleanStart + clean.length;
+                  isMisspelled(clean).then((bad) => {
+                    if (!bad) return;
+                    suggest(clean, 5).then((list) => {
+                      if (list.length === 0) return;
+                      setSpellWord({ word: clean, start: cleanStart, end: cleanEnd });
+                      setSpellSuggestions(list);
+                    });
+                  });
+                }
+              }
             }}
             onKeyDown={(e) => {
               if (showMentions) {
@@ -769,12 +916,74 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
         </form>
 
         {/* Custom context menu — appears on right-click in textarea */}
-        {inputCtxMenu && (
+        {inputCtxMenu && createPortal(
           <div
-            className="fixed bg-card border border-border rounded-lg shadow-2xl py-1 z-[9999]"
-            style={{ left: `${inputCtxMenu.x}px`, top: `${inputCtxMenu.y}px` }}
-            onMouseLeave={() => setInputCtxMenu(null)}
+            ref={inputCtxMenuRef}
+            className="fixed bg-card border border-border rounded-lg shadow-2xl py-1 z-[9999] min-w-[180px] max-w-[240px] max-h-[80vh] overflow-y-auto"
+            style={{ left: `${inputCtxMenuPos.left}px`, top: `${inputCtxMenuPos.top}px`, visibility: inputCtxMenuPos.ready ? 'visible' : 'hidden' }}
           >
+            {spellSuggestions.length > 0 && spellWord && (
+              <>
+                {spellSuggestions.map((s) => (
+                  <button
+                    key={s}
+                    className="w-full px-4 py-2 flex items-center text-left hover:bg-muted text-sm font-semibold text-foreground transition-colors truncate"
+                    onClick={() => {
+                      const { start, end } = spellWord;
+                      const newText = inputText.slice(0, start) + s + inputText.slice(end);
+                      setInputText(newText);
+                      setInputCtxMenu(null);
+                      setSpellWord(null);
+                      setSpellSuggestions([]);
+                      setTimeout(() => {
+                        const ta = textareaRef.current;
+                        if (!ta) return;
+                        ta.focus();
+                        const pos = start + s.length;
+                        ta.setSelectionRange(pos, pos);
+                      }, 0);
+                    }}
+                  >
+                    {s}
+                  </button>
+                ))}
+                <div className="my-1 border-t border-border" />
+              </>
+            )}
+
+            <button
+              className="w-full px-4 py-2 flex items-center gap-2 hover:bg-muted text-sm font-medium text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled={!ctxHasSelection}
+              onClick={() => {
+                setInputCtxMenu(null);
+                const ta = textareaRef.current;
+                if (!ta) return;
+                const start = ta.selectionStart;
+                const end = ta.selectionEnd;
+                const selected = inputText.substring(start, end);
+                if (!selected) return;
+                navigator.clipboard.writeText(selected).catch(() => {});
+                const newText = inputText.substring(0, start) + inputText.substring(end);
+                setInputText(newText);
+                setTimeout(() => { ta.focus(); ta.setSelectionRange(start, start); }, 0);
+              }}
+            >
+              <Scissors className="h-4 w-4" /> Cut
+            </button>
+            <button
+              className="w-full px-4 py-2 flex items-center gap-2 hover:bg-muted text-sm font-medium text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled={!ctxHasSelection}
+              onClick={() => {
+                setInputCtxMenu(null);
+                const ta = textareaRef.current;
+                if (!ta) return;
+                const selected = inputText.substring(ta.selectionStart, ta.selectionEnd);
+                if (!selected) return;
+                navigator.clipboard.writeText(selected).catch(() => {});
+              }}
+            >
+              <Copy className="h-4 w-4" /> Copy
+            </button>
             <button
               className="w-full px-4 py-2 flex items-center gap-2 hover:bg-muted text-sm font-medium text-foreground transition-colors"
               onClick={async () => {
@@ -837,7 +1046,8 @@ const MessageInput: React.FC<{ onFileError?: (message: string) => void }> = ({ o
             >
               <ClipboardPaste className="h-4 w-4" /> Paste
             </button>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
     </div>

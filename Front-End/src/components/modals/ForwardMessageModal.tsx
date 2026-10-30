@@ -83,10 +83,16 @@ const ForwardMessageModal: React.FC = () => {
     // server-side CopyObject call (no client download/re-upload).  Files that
     // have only a URL are fetched once on the client and re-uploaded normally.
 
-    const withKeys    = messageFiles.filter(f => f && typeof f.key === 'string' && f.key.trim());
-    const withoutKeys = messageFiles.filter(f => f && !(typeof f.key === 'string' && f.key.trim()));
+    // Temp-file shares (see services/tempFiles.ts) aren't stored under any conversation's R2
+    // path at all — the code is a standalone, conversation-independent credential, so forwarding
+    // it is just re-sending the same code, no copy/re-upload needed.
+    const withTempCode = messageFiles.filter(f => f?.tempCode);
+    const withKeys    = messageFiles.filter(f => f && !f.tempCode && typeof f.key === 'string' && f.key.trim());
+    const withoutKeys = messageFiles.filter(f => f && !f.tempCode && !(typeof f.key === 'string' && f.key.trim()));
 
-    const results: any[] = [];
+    const results: any[] = withTempCode.map(f => ({
+      tempCode: f.tempCode, name: f.name, size: f.size, type: f.type, mimeType: f.mimeType, expiresAt: f.expiresAt,
+    }));
 
     // Server-side copy — efficient even for large videos/PDFs
     if (withKeys.length > 0) {

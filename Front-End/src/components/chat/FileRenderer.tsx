@@ -10,8 +10,10 @@ import { useSignedUrl } from '@/hooks/useSignedUrl';
 import { getServeUrl, copyImageToClipboard, prepareImageCopy } from '@/services/fileUrl';
 import { startDownload, startDownloads, useIsDownloading, type DownloadSource } from '@/services/downloadManager';
 import FileCard from '../ui/FileCard';
+import TempFileCard from './TempFileCard';
 
 function toDownloadSource(file: MessageFile): DownloadSource {
+  if (file.tempCode) return { name: file.name, tempCode: file.tempCode };
   return { name: file.name, key: file.key || undefined, url: file.key ? undefined : file.url };
 }
 
@@ -276,6 +278,7 @@ const FileRenderer: React.FC<FileRendererProps> = ({ files, messageId, senderId,
 
   if (files.length === 1) {
     const file = files[0];
+    if (file.tempCode) return <TempFileCard file={file} />;
     if (file.type === 'image') return <SecureImage file={file} onView={() => openGallery(0)} />;
     if (file.type === 'video') return <SecureVideo file={file} onView={() => openGallery(0)} />;
     return <SecureDoc file={file} messageId={messageId} onView={() => openGallery(0)} />;

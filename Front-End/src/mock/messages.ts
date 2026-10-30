@@ -14,6 +14,10 @@ export interface MessageFile {
   size: string;
   type: string;
   mimeType?: string;
+  /** Set when this attachment is a temp-file share (see services/tempFiles.ts) — an
+   *  8-char code looked up fresh at download time instead of a stored R2 key. */
+  tempCode?: string;
+  expiresAt?: string;
 }
 
 export interface LinkMetadata {

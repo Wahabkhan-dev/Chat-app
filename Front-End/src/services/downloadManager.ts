@@ -8,6 +8,7 @@
  */
 
 import { useSyncExternalStore } from 'react';
+import { fetchTempFileInfo } from './tempFiles';
 
 const _rawApiUrl = process.env.NEXT_PUBLIC_API_URL || '';
 const BASE_URL = _rawApiUrl.startsWith('http')
@@ -22,6 +23,8 @@ export interface DownloadSource {
   key?: string;
   /** Direct URL (blob:, data:, or public) — used when there is no key. */
   url?: string;
+  /** Temp-file share code — a fresh signed URL is looked up right before downloading. */
+  tempCode?: string;
 }
 
 export interface DownloadItem {
@@ -87,13 +90,15 @@ export function hasActiveDownloads(): boolean {
 }
 
 function sourceId(source: DownloadSource): string {
-  return source.key ? `key:${source.key}` : `url:${source.url}`;
+  if (source.key) return `key:${source.key}`;
+  if (source.tempCode) return `code:${source.tempCode}`;
+  return `url:${source.url}`;
 }
 
 /** True while a download for this file is in progress — lets buttons show a busy state. */
-export function useIsDownloading(source: { key?: string; url?: string }): boolean {
+export function useIsDownloading(source: { key?: string; url?: string; tempCode?: string }): boolean {
   const { items } = useDownloads();
-  if (!source.key && !source.url) return false;
+  if (!source.key && !source.url && !source.tempCode) return false;
   const sid = sourceId(source as DownloadSource);
   return items.some((it) => it.status === 'downloading' && sourceId(it.source) === sid);
 }
@@ -132,6 +137,15 @@ async function run(id: string, source: DownloadSource) {
     const token = localStorage.getItem('teams_token');
     requestUrl = `${BASE_URL}/files/download?key=${encodeURIComponent(source.key)}&filename=${encodeURIComponent(source.name)}`;
     if (token) headers = { Authorization: `Bearer ${token}` };
+  } else if (source.tempCode) {
+    try {
+      const info = await fetchTempFileInfo(source.tempCode);
+      requestUrl = info.url;
+    } catch (err) {
+      updateItem(id, { status: 'failed', error: (err as Error).message || 'That shared file is no longer available.' });
+      controllers.delete(id);
+      return;
+    }
   } else {
     requestUrl = source.url!;
   }
@@ -199,7 +213,7 @@ async function run(id: string, source: DownloadSource) {
  */
 export function startDownload(source: DownloadSource): void {
   if (typeof window === 'undefined') return;
-  if (!source.key && !source.url) {
+  if (!source.key && !source.url && !source.tempCode) {
     const id = `dl-${++idCounter}`;
     setState({
       items: [{ id, name: source.name, source, status: 'failed', loaded: 0, total: null, error: 'File is not available', startedAt: Date.now() }, ...state.items],
